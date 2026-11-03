@@ -15,15 +15,22 @@ permissions:
   actions: write
 env:
   TAG: ${{ inputs.tag }}
-  GH_TOKEN: ${{ github.token }}
 jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - id: app
+        uses: actions/create-github-app-token@v3.3.0
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # The push to protected master must be made by the GitHub App (only bypass actor).
+          token: ${{ steps.app.outputs.token }}
       - name: Guard - master must be an ancestor of the tag
         run: |
           git fetch --tags --force origin
@@ -34,6 +41,8 @@ jobs:
           fi
           echo "SHA=$SHA" >> "$GITHUB_ENV"
       - name: Load the saved draft state
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release download "$TAG" --pattern deploy-state.json --repo "$GITHUB_REPOSITORY" \
             || { echo "::error::No deploy-state.json on release $TAG: the production draft was not created."; exit 1; }
@@ -56,6 +65,8 @@ jobs:
           git push origin "$SHA:refs/heads/master"
           echo "master -> ${SHA:0:7} ($TAG)" >> "$GITHUB_STEP_SUMMARY"
       - name: Record the GitHub Deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           DEPLOY_ID=$(jq -n --arg ref "$TAG" '{ref:$ref, environment:"production", auto_merge:false, required_contexts:[], description:("Publish " + $ref)}' \
             | gh api -X POST "repos/$GITHUB_REPOSITORY/deployments" --input - --jq .id)
@@ -67,7 +78,10 @@ jobs:
         run: |
           echo "[simulated Jira] move cards of $TAG to Done" | tee -a "$GITHUB_STEP_SUMMARY"
           echo "[simulated Slack] $TAG is live" | tee -a "$GITHUB_STEP_SUMMARY"
-      # The push above is made with GITHUB_TOKEN, so it does NOT trigger sync-master-to-release.
+      # Legacy path, unused when the push is made by the GitHub App (the push triggers
+      # sync-master-to-release by itself). Only for DISPATCH_CHAIN=true setups using GITHUB_TOKEN.
       - name: Dispatch the master -> release sync
         if: ${{ vars.DISPATCH_CHAIN == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: gh workflow run sync-master-to-release.yml --repo "$GITHUB_REPOSITORY" --ref master

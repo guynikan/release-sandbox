@@ -19,15 +19,22 @@ jobs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
     steps:
+      - id: app
+        uses: actions/create-github-app-token@v3.3.0
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
       - uses: googleapis/release-please-action@v5
         id: rp
         with:
+          # App token: the tag/release and the release PR it creates trigger workflows normally.
+          token: ${{ steps.app.outputs.token }}
           target-branch: release
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-      # Events created with GITHUB_TOKEN (tag push, "release published") do not trigger
-      # other workflows, so the production draft is dispatched explicitly.
-      # workflow_dispatch is the documented exception to that rule.
+      # Legacy path, unused with the App token (the published release triggers production-draft).
       - name: Dispatch the production draft
         if: ${{ steps.rp.outputs.release_created == 'true' && vars.DISPATCH_CHAIN == 'true' }}
         env:

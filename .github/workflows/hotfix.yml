@@ -16,16 +16,25 @@ permissions:
   pull-requests: read
   actions: write
 env:
-  GH_TOKEN: ${{ github.token }}
   PR: ${{ inputs.pr }}
 jobs:
   hotfix:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - id: app
+        uses: actions/create-github-app-token@v3.3.0
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: read
+      - name: Use the App token for gh and git
+        run: echo "GH_TOKEN=${{ steps.app.outputs.token }}" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          token: ${{ steps.app.outputs.token }}
       - name: Verify the PR
         run: |
           gh pr view "$PR" --json state,baseRefName,headRefName,title,url,isCrossRepository > pr.json
@@ -93,7 +102,9 @@ jobs:
           NOTES=$(sed -n "/^## \[$NEXT\]/,/^## \[/p" CHANGELOG.md | sed '$d')
           gh release create "hotfix-$NEXT" --target "$TAG_SHA" --title "hotfix-$NEXT" --notes "$NOTES"
           echo "Release hotfix-$NEXT created at ${TAG_SHA:0:7} (hotfix PR #$PR)" >> "$GITHUB_STEP_SUMMARY"
+      # Legacy path, unused with the App token (the published release triggers production-draft).
       - name: Dispatch the production draft
+        if: ${{ vars.DISPATCH_CHAIN == 'true' }}
         run: gh workflow run production-draft.yml --repo "$GITHUB_REPOSITORY" -f tag="hotfix-$NEXT"
       - name: Simulated Jira notice
         run: |
