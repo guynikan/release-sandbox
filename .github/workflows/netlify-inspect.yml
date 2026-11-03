@@ -1,0 +1,34 @@
+name: Netlify inspect
+# Read-only helper: prints non-secret deploy info for one of the sandbox sites.
+on:
+  workflow_dispatch:
+    inputs:
+      site:
+        description: preview | staging | production
+        default: staging
+      url:
+        description: Optional URL to fetch and show (first 40 lines + sha256)
+        default: ''
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      SITE: ${{ inputs.site }}
+      URL: ${{ inputs.url }}
+      PREVIEW_ID: ${{ vars.NETLIFY_PREVIEW_SITE_ID }}
+      STAGING_ID: ${{ vars.NETLIFY_STAGING_SITE_ID }}
+      PRODUCTION_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID }}
+    steps:
+      - run: |
+          case "$SITE" in preview) ID=$PREVIEW_ID;; staging) ID=$STAGING_ID;; *) ID=$PRODUCTION_ID;; esac
+          A="Authorization: Bearer $NETLIFY_AUTH_TOKEN"
+          curl -fsS -H "$A" "https://api.netlify.com/api/v1/sites/$ID" | jq '{name, published: .published_deploy.id, published_at: .published_deploy.published_at, locked: .published_deploy.locked, url: .ssl_url}'
+          curl -fsS -H "$A" "https://api.netlify.com/api/v1/sites/$ID/deploys?per_page=15" | jq -r '.[]|[.id,.state,.context,.branch,(.commit_ref//"-")[0:7],.created_at,(.published_at//"-"),(.deploy_time//"-"|tostring),(.error_message//"-"),(.deploy_ssl_url)]|@tsv'
+          if [ -n "$URL" ]; then
+            echo "--- GET $URL"; curl -sS -o body.html -w 'http %{http_code}\n' "$URL"; sha256sum body.html; grep -ao 'REACT_APP[^"<]*\|api\.[a-z.]*example\.test\|[0-9a-f]\{7,40\}' body.html | sort -u | head -20
+            for f in $(grep -ao 'static/js/[^"]*\.js' body.html | sort -u); do curl -sS "$(dirname $URL/x)/$f" -o f.js; echo "$f $(sha256sum f.js|cut -c1-16)"; grep -ao 'api\.[a-z]*\.example\.test' f.js | sort -u; done
+          fi
