@@ -41,12 +41,17 @@ jobs:
           echo "HEAD_REF=$HEAD" >> "$GITHUB_ENV"
           echo "PR_TITLE=$(jq -r .title pr.json)" >> "$GITHUB_ENV"
           echo "PR_URL=$(jq -r .url pr.json)" >> "$GITHUB_ENV"
-      - name: Compute the next patch from the latest tag on master
+      # The hotfix tag is deliberately NOT a v-prefixed semver tag: release-please takes the latest
+      # semver tag as "last release" and, once master is merged back into release, it would stop
+      # walking the history at the hotfix commit and silently drop the unreleased PRs merged on
+      # release before it (verified in the sandbox). The patch is computed from master's version.
+      - name: Compute the next patch from the version on master
         run: |
-          LATEST=$(git describe --tags --abbrev=0 --match 'v*' origin/master)
-          IFS=. read -r MAJ MIN PAT <<< "${LATEST#v}"
+          CURRENT=$(git show origin/master:package.json | jq -r .version)
+          LATEST="v$CURRENT"
+          IFS=. read -r MAJ MIN PAT <<< "$CURRENT"
           NEXT="$MAJ.$MIN.$((PAT + 1))"
-          git rev-parse -q --verify "refs/tags/v$NEXT" >/dev/null && { echo "::error::Tag v$NEXT already exists"; exit 1; }
+          git rev-parse -q --verify "refs/tags/hotfix-$NEXT" >/dev/null && { echo "::error::Tag hotfix-$NEXT already exists"; exit 1; }
           echo "LATEST=$LATEST" >> "$GITHUB_ENV"
           echo "NEXT=$NEXT" >> "$GITHUB_ENV"
           echo "Next patch: $LATEST -> v$NEXT"
@@ -67,23 +72,23 @@ jobs:
           const date = new Date().toISOString().slice(0, 10);
           const description = PR_TITLE.replace(/^\w+(\([^)]*\))?!?:\s*/, "");
           const entry =
-            `## [${NEXT}](https://github.com/${GITHUB_REPOSITORY}/compare/${LATEST}...v${NEXT}) (${date})\n\n` +
+            `## [${NEXT}](https://github.com/${GITHUB_REPOSITORY}/compare/${LATEST}...hotfix-${NEXT}) (${date})\n\n` +
             `### Correções\n\n* ${description} ([#${PR}](${PR_URL}))\n`;
           const changelog = fs.readFileSync("CHANGELOG.md", "utf8");
           const [head, ...rest] = changelog.split("\n\n");
           fs.writeFileSync("CHANGELOG.md", `${head}\n\n${entry}${rest.length ? "\n" + rest.join("\n\n") : ""}`);
           JS
           git add package.json .release-please-manifest.json CHANGELOG.md
-          git commit -m "chore(release): $NEXT"
+          git commit -m "Release $NEXT (hotfix)"
           git push origin "HEAD:$HEAD_REF"
           echo "TAG_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - name: Tag and create the GitHub Release
         run: |
           NOTES=$(sed -n "/^## \[$NEXT\]/,/^## \[/p" CHANGELOG.md | sed '$d')
-          gh release create "v$NEXT" --target "$TAG_SHA" --title "v$NEXT" --notes "$NOTES"
-          echo "Release v$NEXT created at ${TAG_SHA:0:7} (hotfix PR #$PR)" >> "$GITHUB_STEP_SUMMARY"
+          gh release create "hotfix-$NEXT" --target "$TAG_SHA" --title "hotfix-$NEXT" --notes "$NOTES"
+          echo "Release hotfix-$NEXT created at ${TAG_SHA:0:7} (hotfix PR #$PR)" >> "$GITHUB_STEP_SUMMARY"
       - name: Dispatch the production draft
-        run: gh workflow run production-draft.yml --repo "$GITHUB_REPOSITORY" -f tag="v$NEXT"
+        run: gh workflow run production-draft.yml --repo "$GITHUB_REPOSITORY" -f tag="hotfix-$NEXT"
       - name: Simulated Jira notice
         run: |
-          echo "[simulated Jira] hotfix v$NEXT: link card to release" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "[simulated Jira] hotfix $NEXT: link card to release" | tee -a "$GITHUB_STEP_SUMMARY"

@@ -60,7 +60,7 @@ jobs:
         run: |
           API=https://api.netlify.com/api/v1
           PREVIOUS=$(curl -fsS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" "$API/sites/$SITE_ID" | jq -r '.published_deploy.id')
-          PREV_TAG=$(git describe --tags --abbrev=0 --match 'v*' origin/master 2>/dev/null || echo none)
+          PREV_TAG=$(git describe --tags --abbrev=0 --match 'v*' --match 'hotfix-*' origin/master 2>/dev/null || echo none)
           npx --yes netlify-cli@23 deploy --dir build --site "$SITE_ID" --alias pre-producao --json > deploy.json
           DRAFT=$(jq -r '.deploy_id' deploy.json)
           jq -n --arg tag "$TAG" --arg draft "$DRAFT" --arg prev "$PREVIOUS" --arg prevTag "$PREV_TAG" \
@@ -82,7 +82,7 @@ jobs:
       - name: Save simulated state (Netlify disabled)
         run: |
           SHA=$(git rev-list -n1 "refs/tags/$TAG")
-          PREV_TAG=$(git describe --tags --abbrev=0 --match 'v*' origin/master 2>/dev/null || echo none)
+          PREV_TAG=$(git describe --tags --abbrev=0 --match 'v*' --match 'hotfix-*' origin/master 2>/dev/null || echo none)
           jq -n --arg tag "$TAG" --arg draft "simulated-draft-${SHA:0:7}" --arg prev "simulated-published-${PREV_TAG}" --arg prevTag "$PREV_TAG" \
             '{tag:$tag, draftDeployId:$draft, previousDeployId:$prev, previousTag:$prevTag, simulated:true}' > deploy-state.json
           cat deploy-state.json
