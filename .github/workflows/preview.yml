@@ -18,13 +18,18 @@ jobs:
     env:
       BRANCH: ${{ github.head_ref }}
       PREVIEW_SITE: ${{ vars.NETLIFY_PREVIEW_SITE }}
-      HOOK_URL: ${{ secrets.NETLIFY_PREVIEW_HOOK }}
+      SITE_ID: ${{ vars.NETLIFY_PREVIEW_SITE_ID }}
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
       GH_TOKEN: ${{ github.token }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
       SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - name: Trigger the Netlify build hook for the PR branch
         run: |
+          # The hook URL is a secret: fetch it at runtime and mask it.
+          HOOK_URL=$(curl -fsS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" "https://api.netlify.com/api/v1/sites/$SITE_ID/build_hooks" | jq -r '.[]|select(.title=="preview")|.url')
+          [ -n "$HOOK_URL" ] || { echo "::error::build hook 'preview' not found"; exit 1; }
+          echo "::add-mask::$HOOK_URL"
           curl --fail --silent --show-error -X POST -d '{}' \
             "${HOOK_URL}?trigger_branch=${BRANCH}&trigger_title=preview-${SHA:0:7}"
       - name: Comment the fixed preview URL
