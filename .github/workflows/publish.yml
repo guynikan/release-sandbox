@@ -20,6 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Only run from master
+        if: ${{ github.ref != 'refs/heads/master' }}
+        run: |
+          echo "::error::publish must run from master (it uses the App token that can push to protected master)"
+          exit 1
       - id: app
         uses: actions/create-github-app-token@v3.3.0
         with:
