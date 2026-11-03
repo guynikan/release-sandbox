@@ -4,6 +4,9 @@ name: Netlify setup
 on:
   workflow_dispatch:
     inputs:
+      installation_id:
+        description: Netlify GitHub App installation id (non-secret)
+        default: ''
       prefix:
         description: Site name prefix
         default: guynikan-sbx
@@ -16,6 +19,7 @@ jobs:
     env:
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
       PREFIX: ${{ inputs.prefix }}
+      INSTALLATION_ID: ${{ inputs.installation_id }}
       API: https://api.netlify.com/api/v1
     steps:
       - name: Create sites, env vars and hooks
@@ -35,6 +39,10 @@ jobs:
             fi
             [ -n "$ID" ] || { echo "::error::site $NAME not created"; continue; }
             echo "SITE $KIND name=$NAME id=$ID"
+            if [ -n "$INSTALLATION_ID" ]; then
+              BRANCH=release; [ $KIND = production ] && BRANCH=master; [ $KIND = preview ] && BRANCH=netlify-no-production
+              api -X PATCH -d "$(jq -n --arg b "$BRANCH" --argjson i "$INSTALLATION_ID" '{repo:{provider:"github",repo:"guynikan/release-sandbox",repo_path:"guynikan/release-sandbox",repo_url:"https://github.com/guynikan/release-sandbox",branch:$b,cmd:"yarn build",dir:"build",installation_id:$i}}')" "$API/sites/$ID" | jq '{name,message:.message,inst:.build_settings.installation_id,deploy_key:(.build_settings.deploy_key_id!=null),repo:.build_settings.repo_url}'
+            fi
             if [ $KIND = production ]; then URL=https://api.production.example.test; CTX=production; else URL=https://api.staging.example.test; CTX=staging; fi
             api -X POST -d "[{\"key\":\"REACT_APP_API_URL\",\"values\":[{\"value\":\"$URL\",\"context\":\"all\"}]},{\"key\":\"REACT_APP_CONTEXT\",\"values\":[{\"value\":\"$CTX\",\"context\":\"all\"}]}]" \
               "$API/accounts/$ACCOUNT/env?site_id=$ID" | jq -c 'map(.key)' || true
