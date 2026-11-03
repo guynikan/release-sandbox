@@ -42,7 +42,9 @@ jobs:
       - name: Open (or reuse) the sync PR
         if: steps.need.outputs.needed == 'true'
         run: |
-          N=$(gh pr list --head master --base release --state open --json number --jq '.[0].number // empty')
+          # Only a same-repo PR whose head is exactly origin/master is reused.
+          N=$(gh pr list --head master --base release --state open --json number,isCrossRepository,headRefOid \
+            --jq "[.[]|select(.isCrossRepository==false and .headRefOid==\"$(git rev-parse origin/master)\")][0].number // empty")
           if [ -z "$N" ]; then
             N=$(gh pr create --head master --base release \
               --title "Sync master into release" \
@@ -64,7 +66,7 @@ jobs:
             echo "::error::PR #$N has conflicts; left open for manual resolution."
             exit 1
           fi
-          gh pr merge "$N" --merge --subject "Merge master into release (sync #$N)"
+          gh pr merge "$N" --merge --match-head-commit "$(git rev-parse origin/master)" --subject "Merge master into release (sync #$N)"
           echo "MERGED=true" >> "$GITHUB_ENV"
       # Legacy path, unused with the GitHub App token (its merge push triggers these workflows).
       # Only for DISPATCH_CHAIN=true setups that merge with GITHUB_TOKEN.
