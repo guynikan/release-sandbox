@@ -8,16 +8,47 @@
       "package-name": "release-sandbox",
       "changelog-path": "CHANGELOG.md",
       "changelog-sections": [
-        { "type": "feat", "section": "Novidades" },
-        { "type": "fix", "section": "Correções" },
-        { "type": "perf", "section": "Desempenho" },
-        { "type": "refactor", "section": "Refatorações" },
-        { "type": "revert", "section": "Reversões" },
-        { "type": "chore", "section": "Tarefas técnicas" },
-        { "type": "docs", "section": "Documentação", "hidden": true },
-        { "type": "test", "section": "Testes", "hidden": true },
-        { "type": "ci", "section": "Integração contínua", "hidden": true }
+        {
+          "type": "feat",
+          "section": "Novidades"
+        },
+        {
+          "type": "fix",
+          "section": "Correções"
+        },
+        {
+          "type": "perf",
+          "section": "Desempenho"
+        },
+        {
+          "type": "refactor",
+          "section": "Refatorações"
+        },
+        {
+          "type": "revert",
+          "section": "Reversões"
+        },
+        {
+          "type": "chore",
+          "section": "Tarefas técnicas"
+        },
+        {
+          "type": "docs",
+          "section": "Documentação",
+          "hidden": true
+        },
+        {
+          "type": "test",
+          "section": "Testes",
+          "hidden": true
+        },
+        {
+          "type": "ci",
+          "section": "Integração contínua",
+          "hidden": true
+        }
       ]
     }
-  }
+  },
+  "last-release-sha": "73884fd084e789153592dfa93684b7139086eae7"
 }
