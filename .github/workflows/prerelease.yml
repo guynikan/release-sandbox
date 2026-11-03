@@ -17,8 +17,14 @@ jobs:
     steps:
       - name: Trigger the staging build hook
         env:
-          HOOK_URL: ${{ secrets.NETLIFY_STAGING_HOOK }}
-        run: curl --fail --silent --show-error -X POST -d '{}' "${HOOK_URL}?trigger_branch=release&trigger_title=prerelease-${GITHUB_SHA:0:7}"
+          SITE_ID: ${{ vars.NETLIFY_STAGING_SITE_ID }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: |
+          # The hook URL is a secret: fetch it at runtime and mask it.
+          HOOK_URL=$(curl -fsS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" "https://api.netlify.com/api/v1/sites/$SITE_ID/build_hooks" | jq -r '.[]|select(.title=="staging")|.url')
+          [ -n "$HOOK_URL" ] || { echo "::error::build hook 'staging' not found"; exit 1; }
+          echo "::add-mask::$HOOK_URL"
+          curl --fail --silent --show-error -X POST -d '{}' "${HOOK_URL}?trigger_branch=release&trigger_title=prerelease-${GITHUB_SHA:0:7}"
   simulated-staging:
     if: ${{ vars.NETLIFY_ENABLED != 'true' }}
     runs-on: ubuntu-latest
