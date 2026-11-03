@@ -60,6 +60,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
+          # Squash the branch into one commit typed `hotfix(...)`. The hotfix is already described by the
+          # entry added below; a conventional fix/feat commit would be listed AGAIN in the next
+          # release-please changelog once master is merged back into release (verified in the sandbox).
+          NEW_TITLE=$(printf '%s' "$PR_TITLE" | sed -E 's/^[a-zA-Z]+(\(|:)/hotfix\1/')
+          git reset --soft origin/master
+          git commit -m "$NEW_TITLE (#$PR)"
           node - <<'JS'
           const fs = require("node:fs");
           const { NEXT, LATEST, PR_TITLE, PR_URL, PR, GITHUB_REPOSITORY } = process.env;
@@ -80,7 +86,7 @@ jobs:
           JS
           git add package.json .release-please-manifest.json CHANGELOG.md
           git commit -m "Release $NEXT (hotfix)"
-          git push origin "HEAD:$HEAD_REF"
+          git push --force-with-lease origin "HEAD:$HEAD_REF"
           echo "TAG_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - name: Tag and create the GitHub Release
         run: |
