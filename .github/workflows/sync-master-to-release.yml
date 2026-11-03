@@ -12,13 +12,20 @@ permissions:
   contents: write
   pull-requests: write
   actions: write
-env:
-  GH_TOKEN: ${{ github.token }}
 jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - id: app
+        uses: actions/create-github-app-token@v3.3.0
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Use the App token for gh
+        run: echo "GH_TOKEN=${{ steps.app.outputs.token }}" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -59,8 +66,8 @@ jobs:
           fi
           gh pr merge "$N" --merge --subject "Merge master into release (sync #$N)"
           echo "MERGED=true" >> "$GITHUB_ENV"
-      # The merge is made with GITHUB_TOKEN, so the push to release does NOT trigger
-      # prerelease, sync-develop or release-please. Dispatch them explicitly.
+      # Legacy path, unused with the GitHub App token (its merge push triggers these workflows).
+      # Only for DISPATCH_CHAIN=true setups that merge with GITHUB_TOKEN.
       - name: Dispatch the release-branch workflows
         if: ${{ env.MERGED == 'true' && vars.DISPATCH_CHAIN == 'true' }}
         run: |
