@@ -1,0 +1,35 @@
+name: Netlify admin
+# Sandbox-only generic Netlify API caller (non-secret paths/bodies). Output filtered by jq.
+on:
+  workflow_dispatch:
+    inputs:
+      method:
+        default: GET
+      path:
+        description: API path after /api/v1 (use SITE_PRODUCTION/SITE_STAGING/SITE_PREVIEW placeholders)
+      body:
+        default: ''
+      filter:
+        default: '.'
+permissions:
+  contents: read
+jobs:
+  call:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      METHOD: ${{ inputs.method }}
+      P: ${{ inputs.path }}
+      BODY: ${{ inputs.body }}
+      FILTER: ${{ inputs.filter }}
+      SP: ${{ vars.NETLIFY_PRODUCTION_SITE_ID }}
+      SS: ${{ vars.NETLIFY_STAGING_SITE_ID }}
+      SV: ${{ vars.NETLIFY_PREVIEW_SITE_ID }}
+    steps:
+      - run: |
+          P=${P//SITE_PRODUCTION/$SP}; P=${P//SITE_STAGING/$SS}; P=${P//SITE_PREVIEW/$SV}
+          case "$P" in *build_hooks*) echo "refusing: hooks are secret"; exit 1;; esac
+          ARGS=(-sS -X "$METHOD" -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" -H 'Content-Type: application/json')
+          [ -n "$BODY" ] && ARGS+=(-d "$BODY")
+          curl "${ARGS[@]}" "https://api.netlify.com/api/v1/$P" | jq "$FILTER"
