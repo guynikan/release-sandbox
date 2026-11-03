@@ -38,7 +38,7 @@ jobs:
           N=$(gh pr list --head master --base release --state open --json number --jq '.[0].number // empty')
           if [ -z "$N" ]; then
             N=$(gh pr create --head master --base release \
-              --title "chore: sync master into release" \
+              --title "Sync master into release" \
               --body "Automatic sync of master (production) into release. Merged with a real merge commit." | sed 's#.*/##')
           fi
           echo "N=$N" >> "$GITHUB_ENV"
