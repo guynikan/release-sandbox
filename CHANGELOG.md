@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.2](https://github.com/guynikan/release-sandbox/compare/v0.2.1...hotfix-0.2.2) (2026-11-03)
+
+### Correções
+
+* Align footer year ([#14](https://github.com/guynikan/release-sandbox/pull/14))
+
 ## [0.2.1](https://github.com/guynikan/release-sandbox/compare/v0.2.0...v0.2.1) (2026-11-03)
 
 ### Correções
