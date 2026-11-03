@@ -7,3 +7,4 @@ Workflows live in `.github/workflows/`; Netlify-related jobs skip until `vars.NE
 Developer scripts: `yarn task <KEY> --type feat|fix|chore --title "..." [--hotfix]` and `yarn pr [--base <branch>]`.
 
 Findings and the run log are kept outside this repo by the sandbox owner.
+
