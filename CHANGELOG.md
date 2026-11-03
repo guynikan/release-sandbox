@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.1](https://github.com/guynikan/release-sandbox/compare/v0.4.0...hotfix-0.4.1) (2026-11-03)
+
+### Correções
+
+* Fix greeting marker c2 ([#44](https://github.com/guynikan/release-sandbox/pull/44))
+
 ## [0.4.0](https://github.com/guynikan/release-sandbox/compare/v0.3.2...v0.4.0) (2026-11-03)
 
 
