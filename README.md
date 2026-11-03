@@ -24,10 +24,14 @@ Developer scripts: `yarn task <KEY> --type feat|fix|chore --title "..." [--hotfi
   The methods are repo-wide (and per ruleset, per branch), not per PR type: `release` receives both feature PRs
   (squash) and sync PRs (merge), so squash-only for features is a convention, not an enforced rule.
 - Actions > "Allow GitHub Actions to create and approve pull requests" must be on (release-please, sync PR).
-- `vars.DISPATCH_CHAIN == 'true'`: events created with `GITHUB_TOKEN` do not trigger workflows, so the chain
-  (publish -> sync -> prerelease/sync-develop/release-please; release-please -> production-draft; hotfix -> production-draft)
-  uses `gh workflow run` (`workflow_dispatch` is the documented exception). Dispatchable workflows must exist on the default branch.
+- GitHub App (`vars.APP_ID`, secret `APP_PRIVATE_KEY`, installed on this repo): `publish`, `sync-master-to-release`,
+  `release-please` and `hotfix` mint a short-lived token with `actions/create-github-app-token` and use it instead of
+  `GITHUB_TOKEN`. Events created by an App token trigger workflows normally, so nothing needs to be dispatched by hand:
+  push to master -> sync; sync merge -> prerelease/sync-develop/release-please; release published -> production-draft;
+  bot PRs run their checks. Minimum permissions used: Contents write, Pull requests write (+ Metadata read);
+  Workflows write only if a push (not a PR merge) may carry changes to `.github/workflows/*`.
+  `vars.DISPATCH_CHAIN` (default `false`) keeps the old `gh workflow run` chain for setups without an App; it is unused here.
 - Rulesets: `release-via-pr-only` (PR required, 0 approvals, no deletion, no force push, merge methods squash+merge);
-  `master-publish-only` (no deletion, no force push; the `update` rule is removed in this sandbox because `GITHUB_TOKEN`
-  cannot be a bypass actor in a personal repo).
+  `master-publish-only` (no deletion, no force push, `update` blocked for everyone; the App is the ONLY bypass actor, so
+  only `publish` can move master). A normal user push or `GITHUB_TOKEN` push to master is rejected.
 - release-please: hotfix tags are `hotfix-X.Y.Z` (not `vX.Y.Z`) and hotfix commits are typed `hotfix(...)`; see `hotfix.yml`.
