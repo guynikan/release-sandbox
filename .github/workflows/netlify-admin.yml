@@ -31,7 +31,7 @@ jobs:
           P=${P//SITE_PRODUCTION/$SP}; P=${P//SITE_STAGING/$SS}; P=${P//SITE_PREVIEW/$SV}
           case "$METHOD" in GET|POST|PATCH|PUT) ;; *) echo "method not allowed"; exit 1;; esac
           # allowlist: only the 3 sandbox sites and deploys; no encoding, globs, traversal or hooks
-          [[ "$P" =~ ^(sites/[0-9a-f-]{36}(/(deploys|builds|env|service-instances))?|deploys/[0-9a-f]{24}(/(lock|unlock|restore|cancel))?|sites/[0-9a-f-]{36}/deploys/[0-9a-f]{24}(/restore)?)(\?[a-z_=0-9&]*)?$ ]] || { echo "path not allowed"; exit 1; }
+          [[ "$P" =~ ^(accounts|accounts/[0-9a-f]{24}|sites/[0-9a-f-]{36}(/(deploys|builds|env|service-instances))?|deploys/[0-9a-f]{24}(/(lock|unlock|restore|cancel))?|sites/[0-9a-f-]{36}/deploys/[0-9a-f]{24}(/restore)?)(\?[a-z_=0-9&]*)?$ ]] || { echo "path not allowed"; exit 1; }
           case "$P" in *%*|*..*|*build_hooks*) echo "path not allowed"; exit 1;; esac
           SITEID=${P#sites/}; SITEID=${SITEID:0:36}
           if [[ "$P" == sites/* ]]; then case "$SITEID" in "$SP"|"$SS"|"$SV") ;; *) echo "site not allowed"; exit 1;; esac; fi
