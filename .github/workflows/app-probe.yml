@@ -1,0 +1,24 @@
+name: App probe
+# Sandbox-only: prints the permissions granted to the GitHub App installation (no secrets).
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      APP_ID: ${{ vars.APP_ID }}
+      APP_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+    steps:
+      - run: |
+          b64() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+          NOW=$(date +%s)
+          H=$(printf '{"alg":"RS256","typ":"JWT"}' | b64)
+          P=$(printf '{"iat":%s,"exp":%s,"iss":"%s"}' $((NOW-30)) $((NOW+300)) "$APP_ID" | b64)
+          printf '%s' "$APP_KEY" > "$RUNNER_TEMP/k.pem"; chmod 600 "$RUNNER_TEMP/k.pem"
+          S=$(printf '%s.%s' "$H" "$P" | openssl dgst -sha256 -sign "$RUNNER_TEMP/k.pem" | b64)
+          rm -f "$RUNNER_TEMP/k.pem"
+          JWT="$H.$P.$S"; echo "::add-mask::$JWT"
+          curl -sS -H "Authorization: Bearer $JWT" https://api.github.com/app | jq '{id,slug,name,permissions,events}'
+          curl -sS -H "Authorization: Bearer $JWT" "https://api.github.com/repos/$GITHUB_REPOSITORY/installation" | jq '{id,repository_selection,permissions}'
