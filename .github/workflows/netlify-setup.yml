@@ -38,5 +38,11 @@ jobs:
             if [ $KIND = production ]; then URL=https://api.production.example.test; CTX=production; else URL=https://api.staging.example.test; CTX=staging; fi
             api -X POST -d "[{\"key\":\"REACT_APP_API_URL\",\"values\":[{\"value\":\"$URL\",\"context\":\"all\"}]},{\"key\":\"REACT_APP_CONTEXT\",\"values\":[{\"value\":\"$CTX\",\"context\":\"all\"}]}]" \
               "$API/accounts/$ACCOUNT/env?site_id=$ID" | jq -c 'map(.key)' || true
+            if [ $KIND != production ]; then
+              HB=$([ $KIND = preview ] && echo master || echo release)
+              if [ -z "$(api "$API/sites/$ID/build_hooks" | jq -r '.[]|select(.title==\"'$KIND'\")|.id')" ]; then
+                api -X POST -d "{\"title\":\"$KIND\",\"branch\":\"$HB\"}" "$API/sites/$ID/build_hooks" | jq '{id,title,branch}'
+              else echo "hook $KIND already exists"; fi
+            fi
             api "$API/sites/$ID" | jq '{repo: .build_settings.repo_url, branch: .build_settings.repo_branch, cmd: .build_settings.cmd, dir: .build_settings.dir}'
           done
