@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.3](https://github.com/guynikan/release-sandbox/compare/v0.2.2...hotfix-0.2.3) (2026-11-03)
+
+### Correções
+
+* Fix empty greeting ([#18](https://github.com/guynikan/release-sandbox/pull/18))
+
 ## [0.2.2](https://github.com/guynikan/release-sandbox/compare/v0.2.1...hotfix-0.2.2) (2026-11-03)
 
 ### Correções
