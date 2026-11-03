@@ -1,0 +1,42 @@
+name: Netlify setup
+# One-off, idempotent: creates the 3 Netlify sites in the personal account, sets env vars,
+# creates build hooks and prints ONLY non-secret outputs (ids, names, urls).
+on:
+  workflow_dispatch:
+    inputs:
+      prefix:
+        description: Site name prefix
+        default: guynikan-sbx
+permissions:
+  contents: read
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      PREFIX: ${{ inputs.prefix }}
+      API: https://api.netlify.com/api/v1
+    steps:
+      - name: Create sites, env vars and hooks
+        run: |
+          set -euo pipefail
+          api() { curl -sS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" -H 'Content-Type: application/json' "$@"; }
+          ACCOUNT=$(api $API/accounts | jq -r '.[0].id'); echo "account slug: $(api $API/accounts | jq -r '.[0].slug')"
+          for KIND in preview staging production; do
+            NAME="$PREFIX-$KIND"
+            ID=$(api "$API/sites?filter=all&per_page=100" | jq -r --arg n "$NAME" '.[]|select(.name==$n)|.id' | head -1)
+            if [ -z "$ID" ]; then
+              BRANCH=release; [ $KIND = production ] && BRANCH=master; [ $KIND = preview ] && BRANCH=netlify-no-production
+              BODY=$(jq -n --arg n "$NAME" --arg b "$BRANCH" '{name:$n,repo:{provider:"github",repo:"guynikan/release-sandbox",branch:$b,cmd:"yarn build",dir:"build"}}')
+              RES=$(api -X POST -d "$BODY" "$API/sites")
+              echo "$RES" | jq '{id,name,ssl_url,error:.message,code:.code}'
+              ID=$(echo "$RES" | jq -r '.id // empty')
+            fi
+            [ -n "$ID" ] || { echo "::error::site $NAME not created"; continue; }
+            echo "SITE $KIND name=$NAME id=$ID"
+            if [ $KIND = production ]; then URL=https://api.production.example.test; CTX=production; else URL=https://api.staging.example.test; CTX=staging; fi
+            api -X POST -d "[{\"key\":\"REACT_APP_API_URL\",\"values\":[{\"value\":\"$URL\",\"context\":\"all\"}]},{\"key\":\"REACT_APP_CONTEXT\",\"values\":[{\"value\":\"$CTX\",\"context\":\"all\"}]}]" \
+              "$API/accounts/$ACCOUNT/env?site_id=$ID" | jq -c 'map(.key)' || true
+            api "$API/sites/$ID" | jq '{repo: .build_settings.repo_url, branch: .build_settings.repo_branch, cmd: .build_settings.cmd, dir: .build_settings.dir}'
+          done
