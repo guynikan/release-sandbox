@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1](https://github.com/guynikan/release-sandbox/compare/v0.2.0...v0.2.1) (2026-11-03)
+
+### Correções
+
+* Escape user name in header ([#9](https://github.com/guynikan/release-sandbox/pull/9))
+
 ## [0.2.0](https://github.com/guynikan/release-sandbox/compare/v0.1.0...v0.2.0) (2026-11-03)
 
 
