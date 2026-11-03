@@ -1,0 +1,90 @@
+name: Production draft
+# Release published (or manual dispatch): build the tag with production env and upload it as a
+# Netlify draft (no --prod, alias pre-producao). Saves the draft id and the currently published
+# deploy id as the release asset deploy-state.json.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (for example v0.2.0)
+        required: true
+concurrency:
+  group: production-draft-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+permissions:
+  contents: write
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  REACT_APP_API_URL: https://api.production.example.test
+  REACT_APP_CONTEXT: production
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: yarn test
+      - run: yarn build
+        env:
+          REACT_APP_COMMIT_SHA: ${{ github.sha }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: build-${{ env.TAG }}
+          path: build
+          retention-days: 14
+  netlify-draft:
+    needs: build
+    if: ${{ vars.NETLIFY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          name: build-${{ env.TAG }}
+          path: build
+      - name: Deploy as draft and save state
+        run: |
+          API=https://api.netlify.com/api/v1
+          PREVIOUS=$(curl -fsS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" "$API/sites/$SITE_ID" | jq -r '.published_deploy.id')
+          PREV_TAG=$(git describe --tags --abbrev=0 --match 'v*' origin/master 2>/dev/null || echo none)
+          npx --yes netlify-cli@23 deploy --dir build --site "$SITE_ID" --alias pre-producao --json > deploy.json
+          DRAFT=$(jq -r '.deploy_id' deploy.json)
+          jq -n --arg tag "$TAG" --arg draft "$DRAFT" --arg prev "$PREVIOUS" --arg prevTag "$PREV_TAG" \
+            '{tag:$tag, draftDeployId:$draft, previousDeployId:$prev, previousTag:$prevTag, simulated:false}' > deploy-state.json
+          cat deploy-state.json
+          gh release upload "$TAG" deploy-state.json --clobber --repo "$GITHUB_REPOSITORY"
+          echo "Draft $DRAFT of $TAG at https://pre-producao--<site>.netlify.app (previous $PREVIOUS)" >> "$GITHUB_STEP_SUMMARY"
+  simulated-draft:
+    needs: build
+    if: ${{ vars.NETLIFY_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Save simulated state (Netlify disabled)
+        run: |
+          SHA=$(git rev-list -n1 "refs/tags/$TAG")
+          PREV_TAG=$(git describe --tags --abbrev=0 --match 'v*' origin/master 2>/dev/null || echo none)
+          jq -n --arg tag "$TAG" --arg draft "simulated-draft-${SHA:0:7}" --arg prev "simulated-published-${PREV_TAG}" --arg prevTag "$PREV_TAG" \
+            '{tag:$tag, draftDeployId:$draft, previousDeployId:$prev, previousTag:$prevTag, simulated:true}' > deploy-state.json
+          cat deploy-state.json
+          gh release upload "$TAG" deploy-state.json --clobber --repo "$GITHUB_REPOSITORY"
+          echo "### Production draft (simulated) for $TAG" >> "$GITHUB_STEP_SUMMARY"

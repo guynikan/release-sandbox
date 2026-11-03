@@ -1,0 +1,35 @@
+name: Sync develop
+# Push to release: merge release into develop with a real merge commit.
+on:
+  push:
+    branches: [release]
+  workflow_dispatch:
+concurrency:
+  group: sync-develop
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Merge release into develop
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin release develop
+          git checkout -B develop origin/develop
+          if git merge-base --is-ancestor origin/release HEAD; then
+            echo "develop already contains release" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0
+          fi
+          if ! git merge --no-ff origin/release -m "Merge release into develop"; then
+            git merge --abort
+            echo "::error::Merge conflict between release and develop; resolve it manually."
+            exit 1
+          fi
+          git push origin develop
+          echo "develop updated to $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"

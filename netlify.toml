@@ -1,0 +1,6 @@
+[build]
+  command = "yarn build"
+  publish = "build"
+
+# REACT_APP_* style variables are set per Netlify site (preview/staging: staging URL,
+# production: production URL). They are baked into the static output at build time.

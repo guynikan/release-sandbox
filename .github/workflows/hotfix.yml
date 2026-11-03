@@ -1,0 +1,89 @@
+name: Hotfix
+# Guardian-triggered for a hotfix PR (base master, head hotfix/*, based on current master).
+# Bumps the patch version on the hotfix branch, tags and creates the GitHub Release, then
+# dispatches the production draft. Publishing is the usual `publish` workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Hotfix PR number
+        required: true
+concurrency:
+  group: hotfix
+  cancel-in-progress: false
+permissions:
+  contents: write
+  pull-requests: read
+  actions: write
+env:
+  GH_TOKEN: ${{ github.token }}
+  PR: ${{ inputs.pr }}
+jobs:
+  hotfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Verify the PR
+        run: |
+          gh pr view "$PR" --json state,baseRefName,headRefName,title,url,isCrossRepository > pr.json
+          jq -r '"PR \(.url): base=\(.baseRefName) head=\(.headRefName) state=\(.state)"' pr.json
+          [ "$(jq -r .state pr.json)" = "OPEN" ] || { echo "::error::PR is not open"; exit 1; }
+          [ "$(jq -r .baseRefName pr.json)" = "master" ] || { echo "::error::PR base must be master"; exit 1; }
+          [ "$(jq -r .isCrossRepository pr.json)" = "false" ] || { echo "::error::Fork PRs are not supported"; exit 1; }
+          HEAD=$(jq -r .headRefName pr.json)
+          case "$HEAD" in hotfix/*) ;; *) echo "::error::Head branch must start with hotfix/"; exit 1;; esac
+          git fetch origin master "$HEAD"
+          git merge-base --is-ancestor origin/master "origin/$HEAD" \
+            || { echo "::error::Hotfix branch is not based on current master; rebase it first"; exit 1; }
+          echo "HEAD_REF=$HEAD" >> "$GITHUB_ENV"
+          echo "PR_TITLE=$(jq -r .title pr.json)" >> "$GITHUB_ENV"
+          echo "PR_URL=$(jq -r .url pr.json)" >> "$GITHUB_ENV"
+      - name: Compute the next patch from the latest tag on master
+        run: |
+          LATEST=$(git describe --tags --abbrev=0 --match 'v*' origin/master)
+          IFS=. read -r MAJ MIN PAT <<< "${LATEST#v}"
+          NEXT="$MAJ.$MIN.$((PAT + 1))"
+          git rev-parse -q --verify "refs/tags/v$NEXT" >/dev/null && { echo "::error::Tag v$NEXT already exists"; exit 1; }
+          echo "LATEST=$LATEST" >> "$GITHUB_ENV"
+          echo "NEXT=$NEXT" >> "$GITHUB_ENV"
+          echo "Next patch: $LATEST -> v$NEXT"
+      - name: Commit the version bump and changelog entry on the hotfix branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
+          node - <<'JS'
+          const fs = require("node:fs");
+          const { NEXT, LATEST, PR_TITLE, PR_URL, PR, GITHUB_REPOSITORY } = process.env;
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          pkg.version = NEXT;
+          fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          const manifest = JSON.parse(fs.readFileSync(".release-please-manifest.json", "utf8"));
+          manifest["."] = NEXT;
+          fs.writeFileSync(".release-please-manifest.json", JSON.stringify(manifest, null, 2) + "\n");
+          const date = new Date().toISOString().slice(0, 10);
+          const description = PR_TITLE.replace(/^\w+(\([^)]*\))?!?:\s*/, "");
+          const entry =
+            `## [${NEXT}](https://github.com/${GITHUB_REPOSITORY}/compare/${LATEST}...v${NEXT}) (${date})\n\n` +
+            `### Correções\n\n* ${description} ([#${PR}](${PR_URL}))\n`;
+          const changelog = fs.readFileSync("CHANGELOG.md", "utf8");
+          const [head, ...rest] = changelog.split("\n\n");
+          fs.writeFileSync("CHANGELOG.md", `${head}\n\n${entry}${rest.length ? "\n" + rest.join("\n\n") : ""}`);
+          JS
+          git add package.json .release-please-manifest.json CHANGELOG.md
+          git commit -m "chore(release): $NEXT"
+          git push origin "HEAD:$HEAD_REF"
+          echo "TAG_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Tag and create the GitHub Release
+        run: |
+          NOTES=$(sed -n "/^## \[$NEXT\]/,/^## \[/p" CHANGELOG.md | sed '$d')
+          gh release create "v$NEXT" --target "$TAG_SHA" --title "v$NEXT" --notes "$NOTES"
+          echo "Release v$NEXT created at ${TAG_SHA:0:7} (hotfix PR #$PR)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Dispatch the production draft
+        run: gh workflow run production-draft.yml --repo "$GITHUB_REPOSITORY" -f tag="v$NEXT"
+      - name: Simulated Jira notice
+        run: |
+          echo "[simulated Jira] hotfix v$NEXT: link card to release" | tee -a "$GITHUB_STEP_SUMMARY"

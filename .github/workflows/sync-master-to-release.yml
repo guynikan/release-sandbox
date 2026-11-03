@@ -1,0 +1,69 @@
+name: Sync master to release
+# Push to master: open a PR master -> release and merge it with a REAL merge commit when there is
+# no conflict. On conflict the PR stays open with a comment and the workflow fails visibly.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+concurrency:
+  group: sync-master-to-release
+  cancel-in-progress: false
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+env:
+  GH_TOKEN: ${{ github.token }}
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check whether a sync is needed
+        id: need
+        run: |
+          git fetch origin master release
+          if git merge-base --is-ancestor origin/master origin/release; then
+            echo "release already contains master" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Open (or reuse) the sync PR
+        if: steps.need.outputs.needed == 'true'
+        run: |
+          N=$(gh pr list --head master --base release --state open --json number --jq '.[0].number // empty')
+          if [ -z "$N" ]; then
+            N=$(gh pr create --head master --base release \
+              --title "chore: sync master into release" \
+              --body "Automatic sync of master (production) into release. Merged with a real merge commit." | sed 's#.*/##')
+          fi
+          echo "N=$N" >> "$GITHUB_ENV"
+      - name: Merge, or flag the conflict
+        if: steps.need.outputs.needed == 'true'
+        run: |
+          STATE=UNKNOWN
+          for i in $(seq 1 15); do
+            STATE=$(gh pr view "$N" --json mergeable --jq .mergeable)
+            [ "$STATE" != "UNKNOWN" ] && break
+            sleep 4
+          done
+          echo "PR #$N mergeable=$STATE"
+          if [ "$STATE" = "CONFLICTING" ]; then
+            gh pr comment "$N" --body "Conflict between master and release. Resolve it manually on a branch from release (merge master into it) and merge that PR with a merge commit (not squash). This PR is left open on purpose."
+            echo "::error::PR #$N has conflicts; left open for manual resolution."
+            exit 1
+          fi
+          gh pr merge "$N" --merge --subject "Merge master into release (sync #$N)"
+          echo "MERGED=true" >> "$GITHUB_ENV"
+      # The merge is made with GITHUB_TOKEN, so the push to release does NOT trigger
+      # prerelease, sync-develop or release-please. Dispatch them explicitly.
+      - name: Dispatch the release-branch workflows
+        if: ${{ env.MERGED == 'true' && vars.DISPATCH_CHAIN == 'true' }}
+        run: |
+          for W in prerelease.yml sync-develop.yml release-please.yml; do
+            gh workflow run "$W" --repo "$GITHUB_REPOSITORY" --ref release
+          done

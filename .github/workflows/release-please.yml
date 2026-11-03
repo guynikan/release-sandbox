@@ -1,0 +1,40 @@
+name: Release Please
+on:
+  push:
+    branches: [release]
+  workflow_dispatch:
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: rp
+        with:
+          target-branch: release
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      # Events created with GITHUB_TOKEN (tag push, "release published") do not trigger
+      # other workflows, so the production draft is dispatched explicitly.
+      # workflow_dispatch is the documented exception to that rule.
+      - name: Dispatch the production draft
+        if: ${{ steps.rp.outputs.release_created == 'true' && vars.DISPATCH_CHAIN == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.rp.outputs.tag_name }}
+        run: gh workflow run production-draft.yml --repo "$GITHUB_REPOSITORY" -f tag="$TAG"
+      - name: Note when nothing was dispatched
+        if: ${{ steps.rp.outputs.release_created == 'true' && vars.DISPATCH_CHAIN != 'true' }}
+        run: |
+          echo "Release ${{ steps.rp.outputs.tag_name }} created; production-draft NOT dispatched (DISPATCH_CHAIN off)." >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,46 @@
+name: Preview
+# PR to release or master: ask Netlify to build the PR branch and comment the fixed URL.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [release, master]
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  netlify-preview:
+    if: ${{ vars.NETLIFY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BRANCH: ${{ github.head_ref }}
+      PREVIEW_SITE: ${{ vars.NETLIFY_PREVIEW_SITE }}
+      HOOK_URL: ${{ secrets.NETLIFY_PREVIEW_HOOK }}
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Trigger the Netlify build hook for the PR branch
+        run: |
+          curl --fail --silent --show-error -X POST -d '{}' \
+            "${HOOK_URL}?trigger_branch=${BRANCH}&trigger_title=preview-${SHA:0:7}"
+      - name: Comment the fixed preview URL
+        run: |
+          LABEL="${BRANCH//\//-}"
+          URL="https://${LABEL}--${PREVIEW_SITE}.netlify.app"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --edit-last --create-if-none \
+            --body "Preview for \`${SHA:0:7}\`: ${URL} (the content changes on every build of this branch)"
+  simulated-preview:
+    if: ${{ vars.NETLIFY_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Show what would happen
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          echo "### Preview (simulated, Netlify disabled)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Would trigger the build hook for \`${BRANCH}\` and comment \`https://${BRANCH//\//-}--<preview-site>.netlify.app\`." >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,27 @@
+name: Prerelease
+# Push to release: rebuild the staging site (it shows the release branch).
+on:
+  push:
+    branches: [release]
+  workflow_dispatch:
+concurrency:
+  group: prerelease
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  netlify-staging:
+    if: ${{ vars.NETLIFY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger the staging build hook
+        env:
+          HOOK_URL: ${{ secrets.NETLIFY_STAGING_HOOK }}
+        run: curl --fail --silent --show-error -X POST -d '{}' "${HOOK_URL}?trigger_branch=release&trigger_title=prerelease-${GITHUB_SHA:0:7}"
+  simulated-staging:
+    if: ${{ vars.NETLIFY_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: echo "### Prerelease (simulated, Netlify disabled) for ${GITHUB_SHA:0:7}" >> "$GITHUB_STEP_SUMMARY"

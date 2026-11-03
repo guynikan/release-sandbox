@@ -1,0 +1,73 @@
+name: Publish
+# Guardian-triggered. Publishes the saved draft, then fast-forwards master to the tag.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (for example v0.2.0)
+        required: true
+concurrency:
+  group: publish
+  cancel-in-progress: false
+permissions:
+  contents: write
+  deployments: write
+  actions: write
+env:
+  TAG: ${{ inputs.tag }}
+  GH_TOKEN: ${{ github.token }}
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Guard - master must be an ancestor of the tag
+        run: |
+          git fetch --tags --force origin
+          SHA=$(git rev-list -n1 "refs/tags/$TAG") || { echo "::error::Tag $TAG not found"; exit 1; }
+          if ! git merge-base --is-ancestor origin/master "$SHA"; then
+            echo "::error::master ($(git rev-parse --short origin/master)) is not an ancestor of $TAG (${SHA:0:7}). Sync master into release first."
+            exit 1
+          fi
+          echo "SHA=$SHA" >> "$GITHUB_ENV"
+      - name: Load the saved draft state
+        run: |
+          gh release download "$TAG" --pattern deploy-state.json --repo "$GITHUB_REPOSITORY" \
+            || { echo "::error::No deploy-state.json on release $TAG: the production draft was not created."; exit 1; }
+          cat deploy-state.json
+          echo "DRAFT=$(jq -r .draftDeployId deploy-state.json)" >> "$GITHUB_ENV"
+      - name: Publish the draft (restoreSiteDeploy)
+        if: ${{ vars.NETLIFY_ENABLED == 'true' }}
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID }}
+        run: |
+          curl -fsS -X POST -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+            "https://api.netlify.com/api/v1/sites/$SITE_ID/deploys/$DRAFT/restore" | jq '{id, state, published_at}'
+      - name: Publish the draft (simulated)
+        if: ${{ vars.NETLIFY_ENABLED != 'true' }}
+        run: |
+          echo "Simulated restoreSiteDeploy of $DRAFT (Netlify disabled)" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Fast-forward master to the tag
+        run: |
+          git push origin "$SHA:refs/heads/master"
+          echo "master -> ${SHA:0:7} ($TAG)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Record the GitHub Deployment
+        run: |
+          DEPLOY_ID=$(jq -n --arg ref "$TAG" '{ref:$ref, environment:"production", auto_merge:false, required_contexts:[], description:("Publish " + $ref)}' \
+            | gh api -X POST "repos/$GITHUB_REPOSITORY/deployments" --input - --jq .id)
+          jq -n --arg url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{state:"success", environment:"production", log_url:$url, description:"Published"}' \
+            | gh api -X POST "repos/$GITHUB_REPOSITORY/deployments/$DEPLOY_ID/statuses" --input - >/dev/null
+          echo "Deployment $DEPLOY_ID recorded (production, success)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Simulated Jira/Slack notice
+        run: |
+          echo "[simulated Jira] move cards of $TAG to Done" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "[simulated Slack] $TAG is live" | tee -a "$GITHUB_STEP_SUMMARY"
+      # The push above is made with GITHUB_TOKEN, so it does NOT trigger sync-master-to-release.
+      - name: Dispatch the master -> release sync
+        if: ${{ vars.DISPATCH_CHAIN == 'true' }}
+        run: gh workflow run sync-master-to-release.yml --repo "$GITHUB_REPOSITORY" --ref master
