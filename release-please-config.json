@@ -2,6 +2,8 @@
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "include-component-in-tag": false,
   "include-v-in-tag": false,
+  "bootstrap-sha": "ba170bb959f64c23ec00692872bdd32a84b3cd9a",
+  "pull-request-title-pattern": "chore: release ${version}",
   "packages": {
     ".": {
       "release-type": "node",
@@ -17,19 +19,19 @@
         },
         {
           "type": "perf",
-          "section": "Desempenho"
+          "section": "Tarefas técnicas"
         },
         {
           "type": "refactor",
-          "section": "Refatorações"
-        },
-        {
-          "type": "revert",
-          "section": "Reversões"
+          "section": "Tarefas técnicas"
         },
         {
           "type": "chore",
           "section": "Tarefas técnicas"
+        },
+        {
+          "type": "revert",
+          "section": "Reversões"
         },
         {
           "type": "docs",
@@ -45,9 +47,13 @@
           "type": "ci",
           "section": "Integração contínua",
           "hidden": true
+        },
+        {
+          "type": "style",
+          "section": "Estilo",
+          "hidden": true
         }
       ]
     }
-  },
-  "bootstrap-sha": "ba170bb959f64c23ec00692872bdd32a84b3cd9a"
+  }
 }
