@@ -63,6 +63,7 @@ jobs:
               ;;
           esac
       - name: Find the tag and the saved draft state
+        id: find
         if: steps.pr.outputs.act == 'true'
         env:
           HEAD_REF: ${{ steps.pr.outputs.head_ref }}
@@ -78,8 +79,24 @@ jobs:
             hotfix/*)
               # The hotfix draft tags the exact head commit of the branch. A branch that changed after
               # the draft has no tag on its head, so there is no tested draft for it.
+              # hotfix/* is also the name of ordinary work branches, so the prefix alone decides nothing:
+              # publishing needs a draft made by hotfix-draft for exactly this head commit.
               TAG=$(git tag --points-at "$HEAD_SHA" | grep '^hotfix-' | head -n1 || true)
-              [ -n "$TAG" ] || { echo "::error::No hotfix-* tag points at the head ${HEAD_SHA:0:7} of $HEAD_REF: run hotfix-draft again (the branch changed after the draft, or it never ran)."; exit 1; }
+              if [ -z "$TAG" ]; then
+                PR_NUM="${{ steps.pr.outputs.number }}"
+                STALE=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                  --jq "[.[] | select((.tag_name|startswith(\"hotfix-\")) and (.body|contains(\"/pull/$PR_NUM)\")))][0].tag_name // empty")
+                if [ -n "$STALE" ]; then
+                  echo "::error::PR #$PR_NUM has a hotfix draft ($STALE) but its head ${HEAD_SHA:0:7} is not the drafted commit: the branch changed after the draft. Nothing was published; run hotfix-draft again."
+                  exit 1
+                fi
+                {
+                  echo "### Publish skipped"
+                  echo "PR #$PR_NUM ($HEAD_REF) has no hotfix draft, so this hotfix/* branch is treated as ordinary work. Nothing was published."
+                } | tee -a "$GITHUB_STEP_SUMMARY"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
               ;;
           esac
           gh release download "$TAG" --pattern deploy-state.json --repo "$GITHUB_REPOSITORY" --clobber \
@@ -89,7 +106,7 @@ jobs:
           echo "DRAFT=$(jq -r .draftDeployId deploy-state.json)" >> "$GITHUB_ENV"
           echo "STATE_TREE=$(jq -r .tree deploy-state.json)" >> "$GITHUB_ENV"
       - name: Guard - master tree must equal the tree of the draft
-        if: steps.pr.outputs.act == 'true'
+        if: steps.pr.outputs.act == 'true' && steps.find.outputs.skip != 'true'
         run: |
           MASTER_TREE=$(git rev-parse "$GITHUB_SHA^{tree}")
           TAG_TREE=$(git rev-parse "refs/tags/$TAG^{tree}")
@@ -106,7 +123,7 @@ jobs:
           fi
           echo "Tree guard ok: $MASTER_TREE" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Publish the draft (restoreSiteDeploy, lock kept)
-        if: steps.pr.outputs.act == 'true'
+        if: steps.pr.outputs.act == 'true' && steps.find.outputs.skip != 'true'
         run: |
           API=https://api.netlify.com/api/v1
           H="Authorization: Bearer $NETLIFY_AUTH_TOKEN"
@@ -125,7 +142,7 @@ jobs:
             echo "- https://$SITE_NAME.netlify.app"
           } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Record the GitHub Deployment (production)
-        if: steps.pr.outputs.act == 'true'
+        if: steps.pr.outputs.act == 'true' && steps.find.outputs.skip != 'true'
         env:
           HEAD_REF: ${{ steps.pr.outputs.head_ref }}
         run: |
