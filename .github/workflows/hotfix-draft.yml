@@ -1,0 +1,128 @@
+name: Hotfix draft
+
+# Guardian-triggered for a hotfix PR (base master, head hotfix/*). Updates the branch with master when it is
+# behind, squashes it into ONE commit `hotfix(KEY): ...` (a type release-please ignores, so the hotfix never
+# lands in the next changelog) plus a patch bump commit with a non-conventional message, builds the head with
+# the production context and uploads it as the draft on pre-producao, then creates the tag `hotfix-X.Y.Z`
+# (deliberately NOT a semver tag) and a GitHub Release carrying deploy-state.json.
+# The guardian smoke tests the draft and merges the PR with a MERGE COMMIT; publish.yml publishes.
+# OFF until switch day: gated by the repo variable RELEASE_FLOW_ENABLED.
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Hotfix PR number
+        required: true
+
+concurrency:
+  group: hotfix-draft
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  hotfix-draft:
+    if: ${{ vars.RELEASE_FLOW_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PR: ${{ inputs.pr }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID }}
+      SITE_NAME: ${{ vars.NETLIFY_PRODUCTION_SITE }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Verify the PR
+        run: |
+          gh pr view "$PR" --json state,baseRefName,headRefName,title,url,isCrossRepository > pr.json
+          jq -r '"PR \(.url): base=\(.baseRefName) head=\(.headRefName) state=\(.state)"' pr.json
+          [ "$(jq -r .state pr.json)" = "OPEN" ] || { echo "::error::PR is not open"; exit 1; }
+          [ "$(jq -r .baseRefName pr.json)" = "master" ] || { echo "::error::PR base must be master"; exit 1; }
+          [ "$(jq -r .isCrossRepository pr.json)" = "false" ] || { echo "::error::Fork PRs are not supported"; exit 1; }
+          HEAD=$(jq -r .headRefName pr.json)
+          case "$HEAD" in hotfix/*) ;; *) echo "::error::Head branch must start with hotfix/"; exit 1;; esac
+          echo "HEAD_REF=$HEAD" >> "$GITHUB_ENV"
+          echo "PR_TITLE=$(jq -r .title pr.json)" >> "$GITHUB_ENV"
+          echo "PR_URL=$(jq -r .url pr.json)" >> "$GITHUB_ENV"
+      - name: Compute the next patch from the version on master
+        run: |
+          CURRENT=$(git show origin/master:package.json | jq -r .version)
+          IFS=. read -r MAJ MIN PAT <<< "$CURRENT"
+          NEXT="$MAJ.$MIN.$((PAT + 1))"
+          for T in "hotfix-$NEXT" "v$NEXT" "$NEXT"; do
+            git rev-parse -q --verify "refs/tags/$T" >/dev/null && { echo "::error::Tag $T already exists"; exit 1; }
+          done
+          echo "CURRENT=$CURRENT" >> "$GITHUB_ENV"
+          echo "NEXT=$NEXT" >> "$GITHUB_ENV"
+          echo "TAG=hotfix-$NEXT" >> "$GITHUB_ENV"
+          echo "Next patch: $CURRENT -> $NEXT"
+      - name: Update with master, squash into hotfix(KEY) and add the patch bump commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
+          if ! git merge-base --is-ancestor origin/master HEAD; then
+            echo "Branch is behind master: merging master into it first"
+            if ! git merge --no-edit origin/master; then
+              git merge --abort
+              echo "::error::Conflict between $HEAD_REF and master; resolve it on the branch and run again."
+              exit 1
+            fi
+          fi
+          # One commit typed hotfix(...): release-please ignores unknown types, so the hotfix is not repeated
+          # in the next changelog once master is merged back into release.
+          NEW_TITLE=$(printf '%s' "$PR_TITLE" | sed -E 's/^[a-zA-Z]+(\(|:)/hotfix\1/')
+          case "$NEW_TITLE" in hotfix*) ;; *) NEW_TITLE="hotfix: $NEW_TITLE";; esac
+          git reset --soft origin/master
+          git commit -m "$NEW_TITLE (#$PR)"
+          node - <<'JS'
+          const fs = require("node:fs");
+          const { NEXT } = process.env;
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          pkg.version = NEXT;
+          fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          const manifest = JSON.parse(fs.readFileSync(".release-please-manifest.json", "utf8"));
+          manifest["."] = NEXT;
+          fs.writeFileSync(".release-please-manifest.json", JSON.stringify(manifest, null, 2) + "\n");
+          JS
+          git add package.json .release-please-manifest.json
+          git commit -m "Release $NEXT (hotfix)"
+          git push --force-with-lease origin "HEAD:$HEAD_REF"
+          echo "COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "TREE=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_ENV"
+      - name: Build with the production context of the Netlify site
+        run: |
+          START=$(date +%s)
+          export REACT_APP_COMMIT_SHA=$(git rev-parse HEAD)
+          npx --yes netlify-cli@23 build --context production 2>&1 | tee build.log
+          echo "BUILD_SECONDS=$(( $(date +%s) - START ))" >> "$GITHUB_ENV"
+          test -f build/index.html
+      - name: Deploy the draft on pre-producao and create the tag with deploy-state.json
+        run: |
+          API=https://api.netlify.com/api/v1
+          PREVIOUS=$(curl -fsS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" "$API/sites/$NETLIFY_SITE_ID" | jq -r '.published_deploy.id')
+          npx --yes netlify-cli@23 deploy --no-build --dir build --site "$NETLIFY_SITE_ID" --alias pre-producao --json > deploy.json
+          DRAFT=$(jq -r '.deploy_id' deploy.json)
+          [ -n "$DRAFT" ] && [ "$DRAFT" != null ] || { echo "::error::Netlify did not return a deploy id"; exit 1; }
+          jq -n --arg kind hotfix --arg tag "$TAG" --arg version "$NEXT" --arg commit "$COMMIT" --arg tree "$TREE" \
+            --arg draft "$DRAFT" --arg prev "$PREVIOUS" --arg site "$NETLIFY_SITE_ID" --arg pr "$PR" --arg at "$(date -u +%FT%TZ)" \
+            '{kind:$kind, tag:$tag, version:$version, commit:$commit, tree:$tree, draftDeployId:$draft, previousDeployId:$prev, siteId:$site, pr:($pr|tonumber), createdAt:$at}' > deploy-state.json
+          cat deploy-state.json
+          gh release create "$TAG" deploy-state.json --target "$COMMIT" --title "$TAG" \
+            --notes "Hotfix $NEXT: $PR_TITLE ($PR_URL). Draft deploy $DRAFT."
+          {
+            echo "### Hotfix draft $TAG"
+            echo "- draft deploy: \`$DRAFT\` (previous published: \`$PREVIOUS\`), build ${BUILD_SECONDS}s"
+            echo "- alias: https://pre-producao--$SITE_NAME.netlify.app"
+            echo "- permalink: https://$DRAFT--$SITE_NAME.netlify.app"
+            echo "- commit \`$COMMIT\`, tree \`$TREE\`"
+            echo "- smoke test, then merge $PR_URL with a MERGE COMMIT"
+          } >> "$GITHUB_STEP_SUMMARY"

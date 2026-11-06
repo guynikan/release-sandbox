@@ -1,47 +1,117 @@
 name: Release Please
+
+# Keeps the release PR (version + CHANGELOG.md) up to date on the `release` branch and,
+# when that PR is merged, creates the tag and the GitHub Release. Then builds the tag as a
+# production DRAFT on Netlify (alias pre-producao) and opens the PR publish/X.Y.Z -> master.
+# OFF until switch day: every job is gated by the repo variable RELEASE_FLOW_ENABLED.
 on:
   push:
     branches: [release]
   workflow_dispatch:
+    inputs:
+      redo_draft_tag:
+        description: "Re-run the production draft for this existing tag (recovery only, e.g. v0.5.0)"
+        required: false
+
 concurrency:
   group: release-please
   cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write
-  issues: write
-  actions: write
+
 jobs:
   release-please:
+    if: ${{ vars.RELEASE_FLOW_ENABLED == 'true' && inputs.redo_draft_tag == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
     steps:
-      - id: app
-        uses: actions/create-github-app-token@v3.3.0
+      # GITHUB_TOKEN on purpose (no GitHub App): the tag/release/PR it creates do NOT trigger
+      # other workflows, so anything that must follow runs as a job of this same workflow.
+      - id: rp
+        uses: googleapis/release-please-action@v5
         with:
-          app-id: ${{ vars.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-      - uses: googleapis/release-please-action@v5
-        id: rp
-        with:
-          # App token: the tag/release and the release PR it creates trigger workflows normally.
-          token: ${{ steps.app.outputs.token }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           target-branch: release
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-      # Legacy path, unused with the App token (the published release triggers production-draft).
-      - name: Dispatch the production draft
-        if: ${{ steps.rp.outputs.release_created == 'true' && vars.DISPATCH_CHAIN == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.rp.outputs.tag_name }}
-        run: gh workflow run production-draft.yml --repo "$GITHUB_REPOSITORY" -f tag="$TAG"
-      - name: Note when nothing was dispatched
-        if: ${{ steps.rp.outputs.release_created == 'true' && vars.DISPATCH_CHAIN != 'true' }}
+
+  production-draft:
+    needs: release-please
+    # `always()` so the recovery input can run this job alone (release-please is skipped then).
+    if: >-
+      ${{ always() && vars.RELEASE_FLOW_ENABLED == 'true' &&
+      (needs.release-please.outputs.release_created == 'true' || inputs.redo_draft_tag != '') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TAG: ${{ needs.release-please.outputs.tag_name || inputs.redo_draft_tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID }}
+      SITE_NAME: ${{ vars.NETLIFY_PRODUCTION_SITE }}
+    steps:
+      # The TAG commit, never github.sha (on release/dispatch events github.sha is the default branch head).
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Build the tag with the production context of the Netlify site
         run: |
-          echo "Release ${{ steps.rp.outputs.tag_name }} created; production-draft NOT dispatched (DISPATCH_CHAIN off)." >> "$GITHUB_STEP_SUMMARY"
+          START=$(date +%s)
+          # No REACT_APP_API_URL / REACT_APP_CONTEXT here on purpose: `netlify build --context production`
+          # pulls the production-context variables from the Netlify site itself.
+          export REACT_APP_COMMIT_SHA=$(git rev-parse HEAD)
+          npx --yes netlify-cli@23 build --context production 2>&1 | tee build.log
+          echo "BUILD_SECONDS=$(( $(date +%s) - START ))" >> "$GITHUB_ENV"
+          test -f build/index.html
+      - name: Deploy as a draft on pre-producao (no --prod, no rebuild)
+        run: |
+          API=https://api.netlify.com/api/v1
+          PREVIOUS=$(curl -fsS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" "$API/sites/$NETLIFY_SITE_ID" | jq -r '.published_deploy.id')
+          npx --yes netlify-cli@23 deploy --no-build --dir build --site "$NETLIFY_SITE_ID" --alias pre-producao --json > deploy.json
+          DRAFT=$(jq -r '.deploy_id' deploy.json)
+          [ -n "$DRAFT" ] && [ "$DRAFT" != null ] || { echo "::error::Netlify did not return a deploy id"; exit 1; }
+          COMMIT=$(git rev-parse HEAD)
+          TREE=$(git rev-parse 'HEAD^{tree}')
+          VERSION="${TAG#v}"
+          jq -n --arg kind release --arg tag "$TAG" --arg version "$VERSION" --arg commit "$COMMIT" --arg tree "$TREE" \
+            --arg draft "$DRAFT" --arg prev "$PREVIOUS" --arg site "$NETLIFY_SITE_ID" --arg at "$(date -u +%FT%TZ)" \
+            '{kind:$kind, tag:$tag, version:$version, commit:$commit, tree:$tree, draftDeployId:$draft, previousDeployId:$prev, siteId:$site, createdAt:$at}' > deploy-state.json
+          cat deploy-state.json
+          gh release upload "$TAG" deploy-state.json --clobber --repo "$GITHUB_REPOSITORY"
+          {
+            echo "### Production draft for $TAG"
+            echo "- draft deploy: \`$DRAFT\` (previous published: \`$PREVIOUS\`)"
+            echo "- alias: https://pre-producao--$SITE_NAME.netlify.app"
+            echo "- permalink: https://$DRAFT--$SITE_NAME.netlify.app"
+            echo "- commit \`$COMMIT\`, tree \`$TREE\`, build+env step ${BUILD_SECONDS}s"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "DRAFT=$DRAFT" >> "$GITHUB_ENV"
+          echo "COMMIT=$COMMIT" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+      - name: Open the PR publish/X.Y.Z -> master (branch frozen at the tag)
+        run: |
+          BRANCH="publish/$VERSION"
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" >/dev/null 2>&1; then
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$COMMIT" >/dev/null
+          fi
+          N=$(gh pr list --base master --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -z "$N" ]; then
+            BODY="Production draft for **$TAG**, built from the tag with the production context.
+
+          - Draft: https://pre-producao--$SITE_NAME.netlify.app
+          - Permalink: https://$DRAFT--$SITE_NAME.netlify.app
+          - Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG
+
+          Smoke test the draft, then merge this PR with a **merge commit**. Merging publishes this exact draft (no rebuild).
+          If the smoke test fails, close this PR without merging; the fix enters \`release\` by PR and a new version is cut."
+            N=$(gh pr create --base master --head "$BRANCH" --title "Release $VERSION" --body "$BODY" | sed 's#.*/##')
+          fi
+          echo "PR #$N: https://github.com/$GITHUB_REPOSITORY/pull/$N" >> "$GITHUB_STEP_SUMMARY"
