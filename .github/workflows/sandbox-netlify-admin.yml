@@ -34,8 +34,9 @@ jobs:
           case "$ACTION" in
             staging-branch)
               [[ "$VALUE" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::bad branch"; exit 1; }
-              curl -fsS -X PATCH -H "$H" -H 'Content-Type: application/json' "$API/sites/$STAGING_ID" \
-                -d "$(jq -n --arg b "$VALUE" '{repo:{branch:$b}}')" | jq '{name, repo_branch: .build_settings.repo_branch}' | tee -a "$GITHUB_STEP_SUMMARY"
+              BODY=$(curl -fsS -H "$H" "$API/sites/$STAGING_ID" | jq --arg b "$VALUE" '{repo: (.build_settings | .repo_branch=$b)}')
+              curl -sS -X PATCH -H "$H" -H 'Content-Type: application/json' "$API/sites/$STAGING_ID" -d "$BODY" \
+                | jq '{name, repo_branch: .build_settings.repo_branch, message}' | tee -a "$GITHUB_STEP_SUMMARY"
               ;;
             production-env)
               KEY="${VALUE%%=*}"; VAL="${VALUE#*=}"
