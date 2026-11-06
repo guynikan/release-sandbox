@@ -4,7 +4,7 @@ const naming = require("../naming");
 
 test("buildNames: normal task branches from release with type prefix", () => {
   const r = naming.buildNames({ key: "SBX-12", type: "feat", title: "Add dark mode toggle" });
-  assert.strictEqual(r.base, "release");
+  assert.strictEqual(r.base, "next-release");
   assert.strictEqual(r.branch, "feat/sbx-12-add-dark-mode-toggle");
   assert.strictEqual(r.title, "feat(SBX-12): Add dark mode toggle");
 });
@@ -37,5 +37,5 @@ test("slugWords strips accents and stopwords", () => {
 
 test("baseFromBranch: hotfix/ -> master, else release", () => {
   assert.strictEqual(naming.baseFromBranch("hotfix/sbx-1-x"), "master");
-  assert.strictEqual(naming.baseFromBranch("feat/sbx-1-x"), "release");
+  assert.strictEqual(naming.baseFromBranch("feat/sbx-1-x"), "next-release");
 });

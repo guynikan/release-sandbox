@@ -1,6 +1,6 @@
-name: Sync master into release
+name: Sync master into next-release
 
-# Push to `master`: open (or reuse) a PR master -> release and merge it with a real merge commit.
+# Push to `master`: open (or reuse) a PR master -> next-release and merge it with a real merge commit.
 # When the merge is refused (conflict, workflow-file restriction, branch rule) the PR stays open with
 # a comment and the run fails; a person then merges it (that merge triggers the downstream workflows).
 # Merges made with GITHUB_TOKEN do not trigger other workflows, so after a successful automatic sync
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: sync-master-to-release
+  group: sync-master-to-next-release
   cancel-in-progress: false
 
 permissions:
@@ -32,15 +32,15 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Sync master into release
+      - name: Sync master into next-release
         id: sync
-        run: .github/scripts/sync-pr.sh release master "Sync master into release"
+        run: .github/scripts/sync-pr.sh next-release master "Sync master into next-release"
       # The merge above was made with GITHUB_TOKEN, so its push to release triggers nothing.
       - name: Dispatch the release-branch workflows
         if: steps.sync.outputs.merged == 'true'
         run: |
           failed=0
           for W in release-please.yml sync-develop.yml; do
-            gh workflow run "$W" --repo "$GITHUB_REPOSITORY" --ref release || failed=1
+            gh workflow run "$W" --repo "$GITHUB_REPOSITORY" --ref next-release || failed=1
           done
           exit "$failed"

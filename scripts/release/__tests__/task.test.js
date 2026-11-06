@@ -12,13 +12,13 @@ test("parseArgs reads key, flags and hotfix", () => {
   assert.throws(() => parseArgs(["SBX-1", "--nope"]), /Unknown argument/);
 });
 
-test("normal task: branches from origin/release and stores title + base", () => {
+test("normal task: branches from origin/next-release and stores title + base", () => {
   const runner = fakeRunner(remoteMissing);
   const r = runTask({ argv: ["SBX-7", "--type", "feat", "--title", "Add search"], runner, log() {} });
   assert.strictEqual(r.branch, "feat/sbx-7-add-search");
-  assert.ok(runner.calls.includes("git checkout --no-track -b feat/sbx-7-add-search origin/release"));
+  assert.ok(runner.calls.includes("git checkout --no-track -b feat/sbx-7-add-search origin/next-release"));
   assert.ok(runner.calls.includes("git config branch.feat/sbx-7-add-search.prTitle feat(SBX-7): Add search"));
-  assert.ok(runner.calls.includes("git config branch.feat/sbx-7-add-search.prBase release"));
+  assert.ok(runner.calls.includes("git config branch.feat/sbx-7-add-search.prBase next-release"));
 });
 
 test("hotfix task: branches from origin/master with hotfix/ prefix", () => {

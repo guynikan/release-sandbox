@@ -1,9 +1,9 @@
 name: Preview
-# PR to release or master: ask Netlify to build the PR branch and comment the fixed URL.
+# PR to next-release or master: ask Netlify to build the PR branch and comment the fixed URL.
 on:
   pull_request:
     types: [opened, reopened, synchronize]
-    branches: [release, master]
+    branches: [next-release, master]
 concurrency:
   group: preview-${{ github.event.pull_request.number }}
   cancel-in-progress: true

@@ -1,12 +1,12 @@
 name: Sync develop
 
-# Push to `release`: merge `release` into `develop` with a real merge commit (no squash/rebase),
+# Push to `next-release`: merge `next-release` into `develop` with a real merge commit (no squash/rebase),
 # pushed with GITHUB_TOKEN. `develop` is not protected, so no PR is needed. On conflict (or if the
-# push is refused) the run fails visibly, nothing is forced, and a person merges release into develop.
+# push is refused) the run fails visibly, nothing is forced, and a person merges next-release into develop.
 # OFF until switch day: gated by the repo variable RELEASE_FLOW_ENABLED.
 on:
   push:
-    branches: [release]
+    branches: [next-release]
   workflow_dispatch:
 
 concurrency:
@@ -28,18 +28,18 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Merge release into develop
+      - name: Merge next-release into develop
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B develop origin/develop
-          if git merge-base --is-ancestor origin/release HEAD; then
+          if git merge-base --is-ancestor origin/next-release HEAD; then
             echo "develop already contains release" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          if ! git merge --no-ff origin/release -m "Merge release into develop"; then
+          if ! git merge --no-ff origin/next-release -m "Merge next-release into develop"; then
             git merge --abort
-            echo "::error::Merge conflict between release and develop. Nothing was pushed. A person must merge release into develop (locally, with a merge commit) and push."
+            echo "::error::Merge conflict between next-release and develop. Nothing was pushed. A person must merge next-release into develop (locally, with a merge commit) and push."
             exit 1
           fi
           # Credentials only for this push (checkout runs with persist-credentials: false). Plain push, never forced.
@@ -47,7 +47,7 @@ jobs:
           echo "::add-mask::$AUTH"
           if ! ERR=$(git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin develop 2>&1); then
             echo "$ERR"
-            echo "::error::Push to develop was refused (${ERR%%$'\n'*}). A person must merge release into develop (merge commit) and push."
+            echo "::error::Push to develop was refused (${ERR%%$'\n'*}). A person must merge next-release into develop (merge commit) and push."
             exit 1
           fi
           echo "develop updated to $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
