@@ -1,54 +1,78 @@
 name: Rollback
-# Guardian-triggered. Republishes the production deploy that was live before the given tag.
+
+# Guardian-triggered. Republishes a previous production deploy (restoreSiteDeploy), keeps the lock and
+# records a GitHub Deployment. master does NOT move. Default target: the deploy that was live before
+# the publish that produced the deploy currently live (read from the GitHub Deployment payload).
+# OFF until switch day: gated by the repo variable RELEASE_FLOW_ENABLED.
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: Published tag to roll back from (reads its saved previous deploy id)
-        required: true
+      deploy_id:
+        description: "Netlify deploy id to restore (optional; default = deploy live before the last publish)"
+        required: false
+
 concurrency:
-  group: publish
+  group: production-publish
   cancel-in-progress: false
+
 permissions:
-  contents: write
+  contents: read
   deployments: write
-env:
-  TAG: ${{ inputs.tag }}
-  GH_TOKEN: ${{ github.token }}
+
 jobs:
   rollback:
+    if: ${{ vars.RELEASE_FLOW_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID }}
+      SITE_NAME: ${{ vars.NETLIFY_PRODUCTION_SITE }}
+      INPUT_DEPLOY: ${{ inputs.deploy_id }}
     steps:
-      - name: Load the saved state
+      - name: Resolve the target deploy
         run: |
-          gh release download "$TAG" --pattern deploy-state.json --repo "$GITHUB_REPOSITORY" \
-            || { echo "::error::No deploy-state.json on release $TAG"; exit 1; }
-          cat deploy-state.json
-          echo "PREVIOUS=$(jq -r .previousDeployId deploy-state.json)" >> "$GITHUB_ENV"
-          echo "PREV_TAG=$(jq -r .previousTag deploy-state.json)" >> "$GITHUB_ENV"
-      - name: Republish the previous deploy (restoreSiteDeploy)
-        if: ${{ vars.NETLIFY_ENABLED == 'true' }}
-        env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID }}
+          API=https://api.netlify.com/api/v1
+          H="Authorization: Bearer $NETLIFY_AUTH_TOKEN"
+          CUR=$(curl -fsS -H "$H" "$API/sites/$SITE_ID" | jq -r '.published_deploy.id')
+          TARGET="$INPUT_DEPLOY"
+          if [ -z "$TARGET" ]; then
+            TARGET=$(gh api "repos/$GITHUB_REPOSITORY/deployments?environment=production&per_page=50" \
+              --jq "[.[] | select(.payload.deployId == \"$CUR\")][0].payload.previousDeployId // empty")
+            [ -n "$TARGET" ] || { echo "::error::No recorded publish for the live deploy $CUR; pass deploy_id explicitly."; exit 1; }
+          fi
+          [ "$TARGET" != "$CUR" ] || { echo "::error::Target $TARGET is already the live deploy."; exit 1; }
+          STATE=$(curl -fsS -H "$H" "$API/sites/$SITE_ID/deploys/$TARGET" | jq -r .state)
+          [ "$STATE" = ready ] || { echo "::error::Target deploy $TARGET is not ready (state=$STATE)."; exit 1; }
+          echo "CUR=$CUR" >> "$GITHUB_ENV"
+          echo "TARGET=$TARGET" >> "$GITHUB_ENV"
+          echo "MASTER_BEFORE=$(gh api repos/$GITHUB_REPOSITORY/git/ref/heads/master --jq .object.sha)" >> "$GITHUB_ENV"
+      - name: Restore (lock kept)
         run: |
-          curl -fsS -X POST -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
-            "https://api.netlify.com/api/v1/sites/$SITE_ID/deploys/$PREVIOUS/restore" | jq '{id, state, published_at}'
-      - name: Republish the previous deploy (simulated)
-        if: ${{ vars.NETLIFY_ENABLED != 'true' }}
+          API=https://api.netlify.com/api/v1
+          H="Authorization: Bearer $NETLIFY_AUTH_TOKEN"
+          curl -fsS -X POST -H "$H" "$API/sites/$SITE_ID/deploys/$TARGET/restore" | jq '{id, state, published_at}'
+          for i in $(seq 1 12); do
+            NOW=$(curl -fsS -H "$H" "$API/sites/$SITE_ID" | jq -r '[.published_deploy.id, .published_deploy.locked] | @tsv')
+            [ "${NOW%%$'\t'*}" = "$TARGET" ] && break
+            sleep 3
+          done
+          [ "${NOW%%$'\t'*}" = "$TARGET" ] || { echo "::error::Published deploy is not the target after restore ($NOW)"; exit 1; }
+          MASTER_AFTER=$(gh api repos/$GITHUB_REPOSITORY/git/ref/heads/master --jq .object.sha)
+          {
+            echo "### Rollback"
+            echo "- published deploy: \`$CUR\` -> \`$TARGET\` (locked: ${NOW##*$'\t'})"
+            echo "- master unchanged: \`${MASTER_BEFORE:0:7}\` -> \`${MASTER_AFTER:0:7}\`"
+            echo "- do NOT use pre-producao-- or master-- URLs to check production now; use https://$SITE_NAME.netlify.app"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Record the GitHub Deployment
         run: |
-          echo "Simulated restoreSiteDeploy of $PREVIOUS (Netlify disabled)" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Record the rollback as a GitHub Deployment
-        run: |
-          REF="$TAG"; [ "$PREV_TAG" != "none" ] && REF="$PREV_TAG"
-          DEPLOY_ID=$(jq -n --arg ref "$REF" '{ref:$ref, environment:"production", auto_merge:false, required_contexts:[], description:("Rollback to " + $ref)}' \
+          PAYLOAD=$(jq -cn --arg d "$TARGET" --arg p "$CUR" '{deployId:$d, previousDeployId:$p, tag:"rollback", source:"rollback"}')
+          DID=$(jq -n --arg ref "$MASTER_BEFORE" --arg desc "Rollback to deploy $TARGET" --argjson payload "$PAYLOAD" \
+            '{ref:$ref, environment:"production", auto_merge:false, required_contexts:[], description:$desc, payload:$payload}' \
             | gh api -X POST "repos/$GITHUB_REPOSITORY/deployments" --input - --jq .id)
-          jq -n --arg url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            '{state:"success", environment:"production", log_url:$url, description:"Rolled back"}' \
-            | gh api -X POST "repos/$GITHUB_REPOSITORY/deployments/$DEPLOY_ID/statuses" --input - >/dev/null
-          echo "Rollback recorded as Deployment $DEPLOY_ID (ref $REF). master is NOT moved." >> "$GITHUB_STEP_SUMMARY"
-      - name: Simulated Slack/Jira notice
-        run: |
-          echo "[simulated Slack] Production rolled back from $TAG to $PREV_TAG" | tee -a "$GITHUB_STEP_SUMMARY"
-          echo "[simulated Jira] reopen cards of $TAG" | tee -a "$GITHUB_STEP_SUMMARY"
+          jq -n --arg url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --arg env "https://$SITE_NAME.netlify.app" \
+            '{state:"success", environment:"production", log_url:$url, environment_url:$env, description:"Rolled back"}' \
+            | gh api -X POST "repos/$GITHUB_REPOSITORY/deployments/$DID/statuses" --input - >/dev/null
+          echo "- GitHub Deployment \`$DID\` recorded" >> "$GITHUB_STEP_SUMMARY"

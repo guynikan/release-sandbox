@@ -1,35 +1,53 @@
 name: Sync develop
-# Push to release: merge release into develop with a real merge commit.
+
+# Push to `release`: merge `release` into `develop` with a real merge commit (no squash/rebase),
+# pushed with GITHUB_TOKEN. `develop` is not protected, so no PR is needed. On conflict (or if the
+# push is refused) the run fails visibly, nothing is forced, and a person merges release into develop.
+# OFF until switch day: gated by the repo variable RELEASE_FLOW_ENABLED.
 on:
   push:
     branches: [release]
   workflow_dispatch:
+
 concurrency:
   group: sync-develop
   cancel-in-progress: false
+
 permissions:
   contents: write
+
 jobs:
   merge:
+    if: ${{ vars.RELEASE_FLOW_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Merge release into develop
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin release develop
           git checkout -B develop origin/develop
           if git merge-base --is-ancestor origin/release HEAD; then
-            echo "develop already contains release" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0
+            echo "develop already contains release" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
           if ! git merge --no-ff origin/release -m "Merge release into develop"; then
             git merge --abort
-            echo "::error::Merge conflict between release and develop; resolve it manually."
+            echo "::error::Merge conflict between release and develop. Nothing was pushed. A person must merge release into develop (locally, with a merge commit) and push."
             exit 1
           fi
-          git push origin develop
+          # Credentials only for this push (checkout runs with persist-credentials: false). Plain push, never forced.
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$AUTH"
+          if ! ERR=$(git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin develop 2>&1); then
+            echo "$ERR"
+            echo "::error::Push to develop was refused (${ERR%%$'\n'*}). A person must merge release into develop (merge commit) and push."
+            exit 1
+          fi
           echo "develop updated to $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
