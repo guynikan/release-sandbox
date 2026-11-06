@@ -38,3 +38,4 @@ Developer scripts: `yarn task <KEY> --type feat|fix|chore --title "..." [--hotfi
 
 d3 extra line that the tested draft does not have
 <!-- ordinary hotfix/* work -->
+<!-- pushed after the draft -->
