@@ -1,8 +1,8 @@
 name: Prerelease
-# Push to release: rebuild the staging site (it shows the release branch).
+# Push to next-release: rebuild the staging site (it shows the next-release branch).
 on:
   push:
-    branches: [release]
+    branches: [next-release]
   workflow_dispatch:
 concurrency:
   group: prerelease
@@ -24,7 +24,7 @@ jobs:
           HOOK_URL=$(curl -fsS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" "https://api.netlify.com/api/v1/sites/$SITE_ID/build_hooks" | jq -r '.[]|select(.title=="staging")|.url')
           [ -n "$HOOK_URL" ] || { echo "::error::build hook 'staging' not found"; exit 1; }
           echo "::add-mask::$HOOK_URL"
-          curl --fail --silent --show-error -X POST -d '{}' "${HOOK_URL}?trigger_branch=release&trigger_title=prerelease-${GITHUB_SHA:0:7}"
+          curl --fail --silent --show-error -X POST -d '{}' "${HOOK_URL}?trigger_branch=next-release&trigger_title=prerelease-${GITHUB_SHA:0:7}"
   simulated-staging:
     if: ${{ vars.NETLIFY_ENABLED != 'true' }}
     runs-on: ubuntu-latest

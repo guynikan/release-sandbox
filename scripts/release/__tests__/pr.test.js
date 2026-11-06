@@ -10,12 +10,12 @@ test("uses stored title and base", () => {
   const runner = fakeRunner({
     "git rev-parse --abbrev-ref": { stdout: "feat/sbx-1-x\n" },
     "git config --get branch.feat/sbx-1-x.prTitle": { stdout: "feat(SBX-1): X\n" },
-    "git config --get branch.feat/sbx-1-x.prBase": { stdout: "release\n" },
+    "git config --get branch.feat/sbx-1-x.prBase": { stdout: "next-release\n" },
     "gh pr create": { stdout: "https://example.test/pull/1\n" },
   });
   const r = runPr({ runner, deps, log() {} });
-  assert.strictEqual(r.base, "release");
-  assert.match(prCall(runner), /--base release .*--title feat\(SBX-1\): X/);
+  assert.strictEqual(r.base, "next-release");
+  assert.match(prCall(runner), /--base next-release .*--title feat\(SBX-1\): X/);
 });
 
 test("falls back to hotfix/ -> master when no stored base", () => {
@@ -33,12 +33,12 @@ test("falls back to release for ordinary branches; --base overrides", () => {
     "git config --get branch.chore/sbx-3-z.prTitle": { stdout: "chore(SBX-3): Z\n" },
     "git config --get branch.chore/sbx-3-z.prBase": { code: 1 },
   });
-  assert.strictEqual(runPr({ runner: mk(), deps, log() {} }).base, "release");
+  assert.strictEqual(runPr({ runner: mk(), deps, log() {} }).base, "next-release");
   assert.strictEqual(runPr({ argv: ["--base", "develop"], runner: mk(), deps, log() {} }).base, "develop");
 });
 
 test("refuses protected branches and branches without a stored title", () => {
-  assert.throws(() => runPr({ runner: fakeRunner({ "git rev-parse --abbrev-ref": { stdout: "release\n" } }), deps }), /cannot open a PR/);
+  assert.throws(() => runPr({ runner: fakeRunner({ "git rev-parse --abbrev-ref": { stdout: "next-release\n" } }), deps }), /cannot open a PR/);
   assert.throws(
     () => runPr({ runner: fakeRunner({ "git rev-parse --abbrev-ref": { stdout: "feat/x\n" }, "git config --get": { code: 1 } }), deps }),
     /No stored PR title/

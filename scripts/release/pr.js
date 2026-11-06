@@ -4,7 +4,7 @@ const path = require("node:path");
 const { createRunner, mustRun } = require("./exec");
 const { baseFromBranch } = require("./naming");
 
-const PROTECTED_BRANCHES = ["master", "release", "develop"];
+const PROTECTED_BRANCHES = ["master", "next-release", "develop"];
 const TEMPLATE_PATH = ".github/pull_request_template.md";
 
 function parseArgs(argv) {
