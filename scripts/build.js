@@ -22,6 +22,16 @@ function render(template, values) {
     .replace(/__CONTEXT__/g, values.context);
 }
 
+// Stand-in for the craco Bugsnag plugin: only when REACT_APP_RELEASE_STAGE=production (no real call).
+function uploadSourcemaps({ out, version, env, root }) {
+  if (env.REACT_APP_RELEASE_STAGE !== "production") return null;
+  const maps = fs.readdirSync(path.join(out, "static")).filter((f) => f.endsWith(".map"));
+  const record = { stage: "production", appVersion: version, maps, at: new Date().toISOString() };
+  fs.writeFileSync(path.join(root, "sourcemap-upload.json"), JSON.stringify(record, null, 2));
+  console.log(`[bugsnag-stand-in] would upload ${maps.length} sourcemap(s) for appVersion ${version}`);
+  return record;
+}
+
 function build({ root = process.cwd(), env = process.env } = {}) {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
   const template = fs.readFileSync(path.join(root, "src", "index.html"), "utf8");
@@ -34,7 +44,12 @@ function build({ root = process.cwd(), env = process.env } = {}) {
   const out = path.join(root, "build");
   fs.mkdirSync(out, { recursive: true });
   fs.writeFileSync(path.join(out, "index.html"), html);
-  return { out, html };
+  // Real CRA builds emit static/*.js and static/*.js.map; emulate it so postbuild has something to delete.
+  fs.mkdirSync(path.join(out, "static"), { recursive: true });
+  fs.writeFileSync(path.join(out, "static", "main.js"), `console.log("${pkg.version}");\n//# sourceMappingURL=main.js.map\n`);
+  fs.writeFileSync(path.join(out, "static", "main.js.map"), JSON.stringify({ version: 3, sources: ["src/index.html"] }));
+  const upload = uploadSourcemaps({ out, version: pkg.version, env, root });
+  return { out, html, upload };
 }
 
 if (require.main === module) {
@@ -42,4 +57,4 @@ if (require.main === module) {
   console.log(`Built ${out}`);
 }
 
-module.exports = { build, render, resolveCommit };
+module.exports = { build, render, resolveCommit, uploadSourcemaps };
