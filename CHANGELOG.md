@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/guynikan/release-sandbox/compare/0.6.0...0.7.0) (2026-11-06)
+
+
+### Novidades
+
+* **SBX-411:** Add d2b greeting marker ([#71](https://github.com/guynikan/release-sandbox/issues/71)) ([bc2f54d](https://github.com/guynikan/release-sandbox/commit/bc2f54d56bbbf669937dc70a3bfc99c2fcb5970a))
+
 ## [0.6.0](https://github.com/guynikan/release-sandbox/compare/0.5.0...0.6.0) (2026-11-06)
 
 
