@@ -3,7 +3,7 @@ name: Cleanup previews
 on:
   pull_request:
     types: [closed]
-    branches: [release, master]
+    branches: [next-release, master]
 concurrency:
   group: cleanup-previews-${{ github.event.pull_request.number }}
   cancel-in-progress: false

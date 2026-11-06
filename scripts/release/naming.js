@@ -58,14 +58,14 @@ function buildNames({ key, type, title, hotfix = false }) {
   if (!trimmed) throw new Error("Missing --title.");
   const prefix = hotfix ? "hotfix" : type;
   return {
-    base: hotfix ? "master" : "release",
+    base: hotfix ? "master" : "next-release",
     branch: buildBranchName({ prefix, key, title: trimmed }),
     title: buildPrTitle({ type, key, title: trimmed }),
   };
 }
 
 // Fallback used by `yarn pr` when the branch has no stored base.
-const baseFromBranch = (branch) => (String(branch).startsWith("hotfix/") ? "master" : "release");
+const baseFromBranch = (branch) => (String(branch).startsWith("hotfix/") ? "master" : "next-release");
 
 module.exports = {
   TYPES,
