@@ -35,3 +35,5 @@ Developer scripts: `yarn task <KEY> --type feat|fix|chore --title "..." [--hotfi
   `master-publish-only` (no deletion, no force push, `update` blocked for everyone; the App is the ONLY bypass actor, so
   only `publish` can move master). A normal user push or `GITHUB_TOKEN` push to master is rejected.
 - release-please: hotfix tags are `hotfix-X.Y.Z` (not `vX.Y.Z`) and hotfix commits are typed `hotfix(...)`; see `hotfix.yml`.
+
+d3 extra line that the tested draft does not have
