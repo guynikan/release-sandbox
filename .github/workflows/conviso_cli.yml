@@ -1,0 +1,16 @@
+name: Vulnerability scanning
+
+# Sandbox no-op equivalent of the real conviso_cli.yml: same triggers, no container and no secret.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  conviso-ast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run AST (stand-in)
+        run: echo "conviso ast run --vulnerability-auto-close (stand-in, no CONVISO_API_KEY in the sandbox)"

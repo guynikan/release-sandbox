@@ -1,0 +1,36 @@
+name: Reset Staging to Master
+
+# Gatilho manual para disparar a action via interface do GitHub
+on:
+  workflow_dispatch:
+
+jobs:
+  reset-staging:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Pega todas as branches e histórico completo
+
+      - name: Set up Git user
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Reset staging to latest commit from master
+        run: |
+          # Verifica as branches mais recentes da origem
+          git fetch origin
+
+          # Muda para a branch staging
+          git checkout staging
+
+          # Reseta a branch staging para o último commit da master
+          git reset --hard origin/master
+
+      - name: Push changes to staging
+        run: |
+          # Força o push para staging para garantir que o reset seja aplicado
+          git push origin staging --force
