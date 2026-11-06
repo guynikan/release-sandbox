@@ -29,7 +29,7 @@ function build({ root = process.cwd(), env = process.env } = {}) {
     version: pkg.version,
     commit: resolveCommit(env),
     apiUrl: env.REACT_APP_API_URL || "http://localhost:3000",
-    context: env.REACT_APP_CONTEXT || "local",
+    context: env.REACT_APP_CONTEXT || env.CONTEXT || "local",
   });
   const out = path.join(root, "build");
   fs.mkdirSync(out, { recursive: true });
