@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/guynikan/release-sandbox/compare/0.9.1...0.9.2) (2026-11-06)
+
+
+### Correções
+
+* **SBX-990:** Realign after the D10c stale hotfix ([#108](https://github.com/guynikan/release-sandbox/issues/108)) ([2b32b21](https://github.com/guynikan/release-sandbox/commit/2b32b21bb5886689fe902328ee7f3054e283ed9e))
+
 ## [0.9.0](https://github.com/guynikan/release-sandbox/compare/0.8.3...0.9.0) (2026-11-06)
 
 
