@@ -1,0 +1,58 @@
+name: Sync branch into Staging after PR Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - staging
+
+jobs:
+  sync-branch:
+    if: github.event.pull_request.merged == true # Apenas quando o PR foi mergeado
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Pega todas as branches
+
+      - name: Determine source branch
+        id: source-branch
+        run: |
+          # Captura a branch de origem do Pull Request que foi mergeado
+          BRANCH=${{ github.event.pull_request.head.ref }}
+          echo "Branch that triggered the merge event: $BRANCH"
+          echo "::set-output name=branch::$BRANCH"
+
+      - name: Output source branch for debugging
+        run: |
+          echo "Branch captured: ${{ steps.source-branch.outputs.branch }}"
+
+      - name: Check if commit is from GitHub Actions bot
+        id: check-bot
+        run: |
+          COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an')
+          if [[ "$COMMIT_AUTHOR" == "github-actions[bot]" ]]; then
+            echo "This commit was made by GitHub Actions. Stopping workflow to avoid loop."
+            exit 0
+          fi
+
+      - name: Set up Git user
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Reset staging to master
+        run: |
+          git checkout staging
+          git reset --hard origin/master  # Reset staging para o último commit da master
+
+      - name: Merge dynamic branch into Staging
+        run: |
+          echo "Merging branch: ${{ steps.source-branch.outputs.branch }}"
+          git merge origin/${{ steps.source-branch.outputs.branch }} --no-ff  # Faz o merge com a branch capturada
+
+      - name: Push changes to staging
+        run: |
+          git push origin staging --force  # Força o push para staging
