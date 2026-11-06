@@ -78,7 +78,7 @@ jobs:
             fi
           fi
           # One commit typed hotfix(...): release-please ignores unknown types, so the hotfix is not repeated
-          # in the next changelog once master is merged back into release.
+          # in the next changelog once master is merged back into next-release.
           NEW_TITLE=$(printf '%s' "$PR_TITLE" | sed -E 's/^[a-zA-Z]+(\(|:)/hotfix\1/')
           case "$NEW_TITLE" in hotfix*) ;; *) NEW_TITLE="hotfix: $NEW_TITLE";; esac
           git reset --soft origin/master
