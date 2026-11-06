@@ -1,92 +1,134 @@
 name: Publish
-# Guardian-triggered. Publishes the saved draft, then fast-forwards master to the tag.
+
+# Push to master. Acts ONLY when the push is the merge of a PR from publish/* (release) or hotfix/*:
+# publishes the saved draft deploy (restoreSiteDeploy, no rebuild) after checking that the master tree
+# equals the tree recorded in deploy-state.json. Any other push is skipped with a note.
+# OFF until switch day: gated by the repo variable RELEASE_FLOW_ENABLED.
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Release tag to publish (for example v0.2.0)
-        required: true
+  push:
+    branches: [master]
+
 concurrency:
-  group: publish
+  group: production-publish
   cancel-in-progress: false
+
 permissions:
-  contents: write
+  contents: read
+  pull-requests: read
   deployments: write
-  actions: write
-env:
-  TAG: ${{ inputs.tag }}
+
 jobs:
   publish:
+    if: ${{ vars.RELEASE_FLOW_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID }}
+      SITE_NAME: ${{ vars.NETLIFY_PRODUCTION_SITE }}
     steps:
-      - name: Only run from master
-        if: ${{ github.ref != 'refs/heads/master' }}
-        run: |
-          echo "::error::publish must run from master (it uses the App token that can push to protected master)"
-          exit 1
-      - id: app
-        uses: actions/create-github-app-token@v3.3.0
-        with:
-          app-id: ${{ vars.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          permission-contents: write
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          # The push to protected master must be made by the GitHub App (only bypass actor).
-          token: ${{ steps.app.outputs.token }}
-      - name: Guard - master must be an ancestor of the tag
+      - name: Is this push the merge of a publish/* or hotfix/* PR?
+        id: pr
+        run: |
+          # The PR lookup by commit can lag right after the merge: retry a few times.
+          PR=""
+          for i in 1 2 3 4 5 6; do
+            PR=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+              --jq "[.[] | select(.merged_at != null and .merge_commit_sha == \"$GITHUB_SHA\" and .base.ref == \"master\" and .head.repo.full_name == \"$GITHUB_REPOSITORY\")][0] | select(. != null) | {number, head_ref: .head.ref, head_sha: .head.sha, title}" || true)
+            [ -n "$PR" ] && break
+            sleep 5
+          done
+          HEAD_REF=$(jq -r '.head_ref // empty' <<<"${PR:-null}")
+          case "$HEAD_REF" in
+            publish/*|hotfix/*)
+              echo "act=true" >> "$GITHUB_OUTPUT"
+              echo "number=$(jq -r .number <<<"$PR")" >> "$GITHUB_OUTPUT"
+              echo "head_ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
+              echo "head_sha=$(jq -r .head_sha <<<"$PR")" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "act=false" >> "$GITHUB_OUTPUT"
+              {
+                echo "### Publish skipped"
+                echo "Push \`${GITHUB_SHA:0:7}\` to master is not the merge of a \`publish/*\` or \`hotfix/*\` PR (PR head: \`${HEAD_REF:-none}\`). Nothing was published."
+              } | tee -a "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
+      - name: Find the tag and the saved draft state
+        if: steps.pr.outputs.act == 'true'
+        env:
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
         run: |
           git fetch --tags --force origin
-          SHA=$(git rev-list -n1 "refs/tags/$TAG") || { echo "::error::Tag $TAG not found"; exit 1; }
-          if ! git merge-base --is-ancestor origin/master "$SHA"; then
-            echo "::error::master ($(git rev-parse --short origin/master)) is not an ancestor of $TAG (${SHA:0:7}). Sync master into release first."
+          case "$HEAD_REF" in
+            publish/*)
+              VER="${HEAD_REF#publish/}"
+              TAG=$(git tag -l "v$VER" "$VER" | head -n1)
+              [ -n "$TAG" ] || { echo "::error::No tag for $HEAD_REF (looked for v$VER and $VER)"; exit 1; }
+              ;;
+            hotfix/*)
+              # The hotfix draft tags the exact head commit of the branch. A branch that changed after
+              # the draft has no tag on its head, so there is no tested draft for it.
+              TAG=$(git tag --points-at "$HEAD_SHA" | grep '^hotfix-' | head -n1 || true)
+              [ -n "$TAG" ] || { echo "::error::No hotfix-* tag points at the head ${HEAD_SHA:0:7} of $HEAD_REF: run hotfix-draft again (the branch changed after the draft, or it never ran)."; exit 1; }
+              ;;
+          esac
+          gh release download "$TAG" --pattern deploy-state.json --repo "$GITHUB_REPOSITORY" --clobber \
+            || { echo "::error::Release $TAG has no deploy-state.json: the draft was not created."; exit 1; }
+          cat deploy-state.json
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "DRAFT=$(jq -r .draftDeployId deploy-state.json)" >> "$GITHUB_ENV"
+          echo "STATE_TREE=$(jq -r .tree deploy-state.json)" >> "$GITHUB_ENV"
+      - name: Guard - master tree must equal the tree of the draft
+        if: steps.pr.outputs.act == 'true'
+        run: |
+          MASTER_TREE=$(git rev-parse "$GITHUB_SHA^{tree}")
+          TAG_TREE=$(git rev-parse "refs/tags/$TAG^{tree}")
+          if [ "$MASTER_TREE" != "$STATE_TREE" ] || [ "$TAG_TREE" != "$STATE_TREE" ]; then
+            {
+              echo "### Publish REFUSED for $TAG"
+              echo "- master tree (\`${GITHUB_SHA:0:7}\`): \`$MASTER_TREE\`"
+              echo "- draft tree (deploy-state.json): \`$STATE_TREE\`"
+              echo "- tag tree: \`$TAG_TREE\`"
+              echo "master contains something the tested draft does not. Nothing was published."
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::error::Refusing to publish $TAG: master tree $MASTER_TREE differs from the draft tree $STATE_TREE. master has content the tested draft does not have. Nothing was published."
             exit 1
           fi
-          echo "SHA=$SHA" >> "$GITHUB_ENV"
-      - name: Load the saved draft state
-        env:
-          GH_TOKEN: ${{ github.token }}
+          echo "Tree guard ok: $MASTER_TREE" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Publish the draft (restoreSiteDeploy, lock kept)
+        if: steps.pr.outputs.act == 'true'
         run: |
-          gh release download "$TAG" --pattern deploy-state.json --repo "$GITHUB_REPOSITORY" \
-            || { echo "::error::No deploy-state.json on release $TAG: the production draft was not created."; exit 1; }
-          cat deploy-state.json
-          echo "DRAFT=$(jq -r .draftDeployId deploy-state.json)" >> "$GITHUB_ENV"
-      - name: Publish the draft (restoreSiteDeploy)
-        if: ${{ vars.NETLIFY_ENABLED == 'true' }}
-        env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID }}
+          API=https://api.netlify.com/api/v1
+          H="Authorization: Bearer $NETLIFY_AUTH_TOKEN"
+          PREVIOUS=$(curl -fsS -H "$H" "$API/sites/$SITE_ID" | jq -r '.published_deploy.id')
+          curl -fsS -X POST -H "$H" "$API/sites/$SITE_ID/deploys/$DRAFT/restore" | jq '{id, state, published_at}'
+          for i in $(seq 1 12); do
+            CUR=$(curl -fsS -H "$H" "$API/sites/$SITE_ID" | jq -r '[.published_deploy.id, .published_deploy.locked] | @tsv')
+            [ "${CUR%%$'\t'*}" = "$DRAFT" ] && break
+            sleep 3
+          done
+          [ "${CUR%%$'\t'*}" = "$DRAFT" ] || { echo "::error::Published deploy is not the draft after restore ($CUR)"; exit 1; }
+          echo "PREVIOUS=$PREVIOUS" >> "$GITHUB_ENV"
+          {
+            echo "### Published $TAG"
+            echo "- published deploy: \`$PREVIOUS\` -> \`$DRAFT\` (locked: ${CUR##*$'\t'})"
+            echo "- https://$SITE_NAME.netlify.app"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Record the GitHub Deployment (production)
+        if: steps.pr.outputs.act == 'true'
         run: |
-          curl -fsS -X POST -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
-            "https://api.netlify.com/api/v1/sites/$SITE_ID/deploys/$DRAFT/restore" | jq '{id, state, published_at}'
-      - name: Publish the draft (simulated)
-        if: ${{ vars.NETLIFY_ENABLED != 'true' }}
-        run: |
-          echo "Simulated restoreSiteDeploy of $DRAFT (Netlify disabled)" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Fast-forward master to the tag
-        run: |
-          git push origin "$SHA:refs/heads/master"
-          echo "master -> ${SHA:0:7} ($TAG)" >> "$GITHUB_STEP_SUMMARY"
-      - name: Record the GitHub Deployment
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          DEPLOY_ID=$(jq -n --arg ref "$TAG" '{ref:$ref, environment:"production", auto_merge:false, required_contexts:[], description:("Publish " + $ref)}' \
+          PAYLOAD=$(jq -cn --arg d "$DRAFT" --arg p "$PREVIOUS" --arg t "$TAG" --arg k "${{ steps.pr.outputs.head_ref }}" \
+            '{deployId:$d, previousDeployId:$p, tag:$t, source:$k}')
+          DID=$(jq -n --arg ref "$GITHUB_SHA" --arg desc "Publish $TAG" --argjson payload "$PAYLOAD" \
+            '{ref:$ref, environment:"production", auto_merge:false, required_contexts:[], description:$desc, payload:$payload}' \
             | gh api -X POST "repos/$GITHUB_REPOSITORY/deployments" --input - --jq .id)
-          jq -n --arg url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            '{state:"success", environment:"production", log_url:$url, description:"Published"}' \
-            | gh api -X POST "repos/$GITHUB_REPOSITORY/deployments/$DEPLOY_ID/statuses" --input - >/dev/null
-          echo "Deployment $DEPLOY_ID recorded (production, success)" >> "$GITHUB_STEP_SUMMARY"
-      - name: Simulated Jira/Slack notice
-        run: |
-          echo "[simulated Jira] move cards of $TAG to Done" | tee -a "$GITHUB_STEP_SUMMARY"
-          echo "[simulated Slack] $TAG is live" | tee -a "$GITHUB_STEP_SUMMARY"
-      # Legacy path, unused when the push is made by the GitHub App (the push triggers
-      # sync-master-to-release by itself). Only for DISPATCH_CHAIN=true setups using GITHUB_TOKEN.
-      - name: Dispatch the master -> release sync
-        if: ${{ vars.DISPATCH_CHAIN == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run sync-master-to-release.yml --repo "$GITHUB_REPOSITORY" --ref master
+          jq -n --arg url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --arg env "https://$SITE_NAME.netlify.app" \
+            '{state:"success", environment:"production", log_url:$url, environment_url:$env, description:"Published"}' \
+            | gh api -X POST "repos/$GITHUB_REPOSITORY/deployments/$DID/statuses" --input - >/dev/null
+          echo "- GitHub Deployment \`$DID\` recorded (production, success)" >> "$GITHUB_STEP_SUMMARY"
