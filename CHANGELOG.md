@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.9.0](https://github.com/guynikan/release-sandbox/compare/0.8.3...0.9.0) (2026-11-06)
+
+
+### Novidades
+
+* **SBX-430:** Add d6a greeting marker ([#81](https://github.com/guynikan/release-sandbox/issues/81)) ([244639e](https://github.com/guynikan/release-sandbox/commit/244639e69c29f5bfe7d9c2527ba5332343b04fc4))
+* **SBX-960:** Old-model feature on release/0.9.2 ([f16ee39](https://github.com/guynikan/release-sandbox/commit/f16ee39bbc7098903cd1b9b30d9b65f57ff820d0))
+* **SBX-960:** Old-model feature on release/0.9.2 ([8c4fa20](https://github.com/guynikan/release-sandbox/commit/8c4fa20dfa16bbadb93678939fb5da8700db008b))
+
+
+### Correções
+
+* **SBX-431:** Close the page with a marker comment ([#82](https://github.com/guynikan/release-sandbox/issues/82)) ([2f36d69](https://github.com/guynikan/release-sandbox/commit/2f36d69f6f10bbf298617246b80189c562574c18))
+* **SBX-905:** Mark the page title as hotfix d6 ([6d87ce5](https://github.com/guynikan/release-sandbox/commit/6d87ce5b931c2ddf5434bc9ccb1e0c48b0abd879))
+
+
+### Tarefas técnicas
+
+* bump version to 0.9.2 ([7b9775e](https://github.com/guynikan/release-sandbox/commit/7b9775e55f559e8be9ebdc6294d11659c6a72808))
+* **SBX-951:** ordinary work on a hotfix/* branch ([#99](https://github.com/guynikan/release-sandbox/issues/99)) ([79afeb0](https://github.com/guynikan/release-sandbox/commit/79afeb06bf343c1c7c16359959bbf6218ee8cc3f))
+
 ## [0.8.1](https://github.com/guynikan/release-sandbox/compare/0.8.0...0.8.1) (2026-11-06)
 
 
