@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.1](https://github.com/guynikan/release-sandbox/compare/0.8.0...0.8.1) (2026-11-06)
+
+
+### Correções
+
+* **SBX-421:** Fix the d4 marker ([#78](https://github.com/guynikan/release-sandbox/issues/78)) ([5d8112d](https://github.com/guynikan/release-sandbox/commit/5d8112dcbac4ee29eb034dbd6e6705a9e7dc3eb0))
+
+## [0.8.0](https://github.com/guynikan/release-sandbox/compare/0.7.0...0.8.0) (2026-11-06)
+
+
+### Novidades
+
+* **SBX-420:** Add d4 BROKEN marker ([#75](https://github.com/guynikan/release-sandbox/issues/75)) ([b367e76](https://github.com/guynikan/release-sandbox/commit/b367e765a9499a231dd9ea52ee8262774e8bdf5f))
+
 ## [0.7.0](https://github.com/guynikan/release-sandbox/compare/0.6.0...0.7.0) (2026-11-06)
 
 
