@@ -20,7 +20,7 @@ concurrency:
 
 permissions:
   contents: write
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   hotfix-draft:
@@ -60,6 +60,18 @@ jobs:
           for T in "hotfix-$NEXT" "v$NEXT" "$NEXT"; do
             git rev-parse -q --verify "refs/tags/$T" >/dev/null && { echo "::error::Tag $T already exists"; exit 1; }
           done
+          # release-please looks for the tag named like the version in the manifest. After the hotfix bump reaches
+          # next-release (sync) that version is NEXT, and only hotfix-NEXT exists, so it would find no release and
+          # recount the whole history. A plain tag NEXT on the commit of the CURRENT release keeps the changelog
+          # anchor where it was (a tag on the hotfix commit itself would hide the PRs already merged on next-release).
+          BASE_V=$(git show origin/master:.release-please-manifest.json | jq -r '.["."]')
+          ANCHOR_TAG=""
+          for T in "$BASE_V" "v$BASE_V"; do
+            git rev-parse -q --verify "refs/tags/$T" >/dev/null && { ANCHOR_TAG="$T"; break; }
+          done
+          [ -n "$ANCHOR_TAG" ] || { echo "::error::No release tag for manifest version $BASE_V"; exit 1; }
+          echo "ANCHOR_SHA=$(git rev-list -n1 "refs/tags/$ANCHOR_TAG")" >> "$GITHUB_ENV"
+          echo "PLAIN_TAG=${ANCHOR_TAG/$BASE_V/$NEXT}" >> "$GITHUB_ENV"
           echo "CURRENT=$CURRENT" >> "$GITHUB_ENV"
           echo "NEXT=$NEXT" >> "$GITHUB_ENV"
           echo "TAG=hotfix-$NEXT" >> "$GITHUB_ENV"
@@ -96,6 +108,8 @@ jobs:
           git add package.json .release-please-manifest.json
           git commit -m "Release $NEXT (hotfix)"
           git push --force-with-lease origin "HEAD:$HEAD_REF"
+          # The PR title becomes the body of the merge commit: keep it out of the next changelog too.
+          gh pr edit "$PR" --title "$NEW_TITLE"
           echo "COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "TREE=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_ENV"
       - name: Build with the production context of the Netlify site
@@ -118,8 +132,10 @@ jobs:
           cat deploy-state.json
           gh release create "$TAG" deploy-state.json --target "$COMMIT" --title "$TAG" \
             --notes "Hotfix $NEXT: $PR_TITLE ($PR_URL). Draft deploy $DRAFT."
+          gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$PLAIN_TAG" -f sha="$ANCHOR_SHA" >/dev/null
           {
             echo "### Hotfix draft $TAG"
+            echo "- plain tag \`$PLAIN_TAG\` -> \`${ANCHOR_SHA:0:7}\` (changelog anchor of the current release, not the hotfix)"
             echo "- draft deploy: \`$DRAFT\` (previous published: \`$PREVIOUS\`), build ${BUILD_SECONDS}s"
             echo "- alias: https://pre-producao--$SITE_NAME.netlify.app"
             echo "- permalink: https://$DRAFT--$SITE_NAME.netlify.app"
