@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/guynikan/release-sandbox/compare/0.4.1...0.5.0) (2026-11-06)
+
+
+### Novidades
+
+* **SBX-401:** Add d1 greeting marker ([#56](https://github.com/guynikan/release-sandbox/issues/56)) ([555dce8](https://github.com/guynikan/release-sandbox/commit/555dce890c422fff52ff043526b2d6f37677ec53))
+
+
+### Tarefas técnicas
+
+* **SBX-402:** emulate postbuild and sourcemap upload stand-in ([8fe8158](https://github.com/guynikan/release-sandbox/commit/8fe8158a8d21bad408bdf4684ceba58975ed7db1))
+
 ## [0.4.1](https://github.com/guynikan/release-sandbox/compare/v0.4.0...hotfix-0.4.1) (2026-11-03)
 
 ### Correções
