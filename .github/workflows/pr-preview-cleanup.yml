@@ -1,0 +1,121 @@
+name: PR preview cleanup
+
+# When a PR is closed, deletes the Netlify deploys of its branch on the `empresas-preview` site.
+#
+# SECURITY: `pull_request_target` runs the workflow from the base branch with access to secrets.
+# Never check out or execute PR code here; only PR metadata is used, via env vars.
+# This is the only job that holds NETLIFY_AUTH_TOKEN (the preview job only has the build hook URL).
+on:
+  pull_request_target:
+    types: [closed]
+
+concurrency:
+  group: pr-preview-cleanup-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    # Skip forks (they never get previews).
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    # Worst case ~50 s of delete retries per stuck deploy, per pass, plus the 30 s wait.
+    timeout-minutes: 10
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      SITE_ID: ${{ vars.NETLIFY_PREVIEW_SITE_ID }}
+      BRANCH: ${{ github.event.pull_request.head.ref }}
+    steps:
+      - name: Skip (Netlify not configured)
+        if: ${{ env.NETLIFY_AUTH_TOKEN == '' || env.SITE_ID == '' }}
+        run: echo "::notice::NETLIFY_AUTH_TOKEN secret or NETLIFY_PREVIEW_SITE_ID variable not set; skipping cleanup."
+
+      - name: Delete the Netlify deploys of the branch
+        if: ${{ env.NETLIFY_AUTH_TOKEN != '' && env.SITE_ID != '' }}
+        run: |
+          set -euo pipefail
+          API=https://api.netlify.com/api/v1
+          AUTH="Authorization: Bearer $NETLIFY_AUTH_TOKEN"
+
+          SITE=$(curl -fsS -H "$AUTH" "$API/sites/$SITE_ID")
+          PROD_BRANCH=$(jq -r '.build_settings.repo_branch // empty' <<<"$SITE")
+          PUBLISHED_ID=$(jq -r '.published_deploy.id // empty' <<<"$SITE")
+
+          # Never touch long-lived branches or the site's production branch.
+          case "$BRANCH" in
+            master|main|develop|release|staging)
+              echo "::notice::Refusing to clean deploys of protected branch."; exit 0 ;;
+          esac
+          if [ -n "$PROD_BRANCH" ] && [ "$BRANCH" = "$PROD_BRANCH" ]; then
+            echo "::notice::Refusing to clean deploys of the site's production branch."; exit 0
+          fi
+
+          BRANCH_Q=$(jq -rn --arg v "$BRANCH" '$v | @uri')
+
+          # Lists the ids of the deploys to clean. Collects all pages first (deleting while paginating would shift the pages).
+          list_ids() {
+            local page=1 resp
+            while [ "$page" -le 20 ]; do
+              # Explicit failure handling: errexit is off inside the $(...) that calls this function.
+              resp=$(curl -fsS -H "$AUTH" "$API/sites/$SITE_ID/deploys?branch=${BRANCH_Q}&per_page=100&page=${page}") || return 1
+              jq -e 'type == "array"' <<<"$resp" >/dev/null || return 1
+              [ "$(jq 'length' <<<"$resp")" -gt 0 ] || break
+              # Client-side filter: the API filter is not trusted. Exact branch, branch-deploy context, never the published deploy.
+              jq -r --arg b "$BRANCH" --arg pub "$PUBLISHED_ID" \
+                '.[] | select(.branch == $b and .context == "branch-deploy" and .id != $pub and .published_at == null) | .id' <<<"$resp"
+              page=$((page + 1))
+            done
+          }
+
+          # A deploy that is still building cannot be deleted (HTTP 405): cancel it first, then retry the DELETE with backoff.
+          delete_deploy() {
+            local id=$1 state code attempt
+            state=$(curl -fsS -H "$AUTH" "$API/deploys/$id" | jq -r '.state // empty') || state=""
+            case "$state" in
+              # Final states need no cancel. Anything else (new, enqueued, building, uploading,
+              # uploaded, preparing, prepared, processing, retrying, ...) or unknown gets cancelled first.
+              ready|error|rejected|skipped) ;;
+              *)
+                echo "Deploy still in progress (state: ${state:-unknown}); cancelling it first."
+                curl -sS -o /dev/null -X POST -H "$AUTH" "$API/deploys/$id/cancel" || echo "::warning::Cancel request failed (will still try to delete)."
+                ;;
+            esac
+            for attempt in 1 2 3 4 5 6; do
+              code=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "$AUTH" "$API/deploys/$id" || echo 000)
+              case "$code" in
+                2??|404) return 0 ;;
+              esac
+              echo "Delete attempt ${attempt}/6 returned HTTP ${code}."
+              [ "$attempt" -lt 6 ] && sleep 10
+            done
+            return 1
+          }
+
+          # One cleanup pass; sets FOUND/DELETED/FAILED.
+          clean_pass() {
+            local id ids
+            FOUND=0; DELETED=0; FAILED=0
+            # A listing failure must fail the job, never look like "matched 0".
+            ids=$(list_ids) || { echo "::error::Failed to list the branch deploys."; exit 1; }
+            for id in $ids; do
+              FOUND=$((FOUND + 1))
+              if delete_deploy "$id"; then
+                DELETED=$((DELETED + 1))
+              else
+                FAILED=$((FAILED + 1))
+                echo "::warning::Failed to delete a deploy (continuing)."
+              fi
+            done
+            echo "Deploys matched: ${FOUND}; deleted: ${DELETED}; failed: ${FAILED}."
+          }
+
+          clean_pass
+
+          # The preview build hook may have fired right before the PR was closed, creating a deploy
+          # after the listing above. Wait a fixed 30 s (covers a hook fired in the last ~30 s), then
+          # list again and clean whatever showed up. A hook fired even later is not covered.
+          sleep 30
+          clean_pass
+          [ "$FAILED" -eq 0 ] || exit 1
