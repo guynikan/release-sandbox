@@ -43,6 +43,10 @@ jobs:
             sleep 5
           done
           HEAD_REF=$(jq -r '.head_ref // empty' <<<"${PR:-null}")
+          # Branch names may contain shell metacharacters: only a strict pattern is accepted.
+          case "$HEAD_REF" in
+            publish/*|hotfix/*) [[ "$HEAD_REF" =~ ^(publish|hotfix)/[A-Za-z0-9._-]+$ ]] || { echo "::error::Unexpected branch name"; exit 1; } ;;
+          esac
           case "$HEAD_REF" in
             publish/*|hotfix/*)
               echo "act=true" >> "$GITHUB_OUTPUT"
@@ -122,8 +126,10 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Record the GitHub Deployment (production)
         if: steps.pr.outputs.act == 'true'
+        env:
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
         run: |
-          PAYLOAD=$(jq -cn --arg d "$DRAFT" --arg p "$PREVIOUS" --arg t "$TAG" --arg k "${{ steps.pr.outputs.head_ref }}" \
+          PAYLOAD=$(jq -cn --arg d "$DRAFT" --arg p "$PREVIOUS" --arg t "$TAG" --arg k "$HEAD_REF" \
             '{deployId:$d, previousDeployId:$p, tag:$t, source:$k}')
           DID=$(jq -n --arg ref "$GITHUB_SHA" --arg desc "Publish $TAG" --argjson payload "$PAYLOAD" \
             '{ref:$ref, environment:"production", auto_merge:false, required_contexts:[], description:$desc, payload:$payload}' \
