@@ -56,7 +56,7 @@ jobs:
 
           # Safety net B: never build long-lived branches.
           case "$BRANCH" in
-            master|develop|staging|main|release*)
+            master|develop|staging|main|next-release|release*)
               echo "::notice::Head branch '$BRANCH' is a long-lived branch; skipping preview."
               echo "run=false" >> "$GITHUB_OUTPUT"
               exit 0

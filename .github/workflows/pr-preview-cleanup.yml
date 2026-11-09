@@ -45,7 +45,7 @@ jobs:
 
           # Never touch long-lived branches or the site's production branch.
           case "$BRANCH" in
-            master|main|develop|release|staging)
+            master|main|develop|release|next-release|staging)
               echo "::notice::Refusing to clean deploys of protected branch."; exit 0 ;;
           esac
           if [ -n "$PROD_BRANCH" ] && [ "$BRANCH" = "$PROD_BRANCH" ]; then
