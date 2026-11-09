@@ -1,7 +1,7 @@
 # release-sandbox
 
 Fictional sandbox that reproduces a release-please based release flow. Nothing here is real product code.
-Phase D design: no GitHub App; master advances only through a PR merged by a person.
+Phase D design (rerun in phase E with the PR 5198 files): no GitHub App; master advances only through a PR merged by a person.
 
 | Branch | Role |
 | --- | --- |
