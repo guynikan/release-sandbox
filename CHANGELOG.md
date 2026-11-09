@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0](https://github.com/guynikan/release-sandbox/compare/0.12.1...0.13.0) (2026-11-09)
+
+
+### Novidades
+
+* **SBX-1001:** add weekly highlights line to the page ([#141](https://github.com/guynikan/release-sandbox/issues/141)) ([f488902](https://github.com/guynikan/release-sandbox/commit/f488902a8c343d19d559c79f22a3fc751d2486fe))
+
+
+### Correções
+
+* **SBX-1002:** use a friendlier greeting text ([#143](https://github.com/guynikan/release-sandbox/issues/143)) ([f103f2a](https://github.com/guynikan/release-sandbox/commit/f103f2a2ae1a6a9d0b4349db0d1d5af784eb5d4c))
+
 ## [0.12.1](https://github.com/guynikan/release-sandbox/compare/0.12.0...0.12.1) (2026-11-09)
 
 
