@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/guynikan/release-sandbox/compare/0.12.0...0.12.1) (2026-11-09)
+
+
+### Correções
+
+* **SBX-999:** realign production after phase E ([#134](https://github.com/guynikan/release-sandbox/issues/134)) ([e7003e9](https://github.com/guynikan/release-sandbox/commit/e7003e98c95050deab289be824d1c518efb4f06d))
+
 ## [0.12.0](https://github.com/guynikan/release-sandbox/compare/0.11.2...0.12.0) (2026-11-09)
 
 
