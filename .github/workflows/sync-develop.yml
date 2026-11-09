@@ -34,7 +34,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B develop origin/develop
           if git merge-base --is-ancestor origin/next-release HEAD; then
-            echo "develop already contains release" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "develop already contains next-release" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           if ! git merge --no-ff origin/next-release -m "Merge next-release into develop"; then

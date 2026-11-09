@@ -1,14 +1,14 @@
 name: Rollback
 
-# Guardian-triggered. Republishes a previous production deploy (restoreSiteDeploy), keeps the lock and
-# records a GitHub Deployment. master does NOT move. Default target: the deploy that was live before
-# the publish that produced the deploy currently live (read from the GitHub Deployment payload).
+# Guardian-triggered. Republishes a previous production deploy (restoreSiteDeploy), keeps the lock and records
+# a GitHub Deployment. master does NOT move. Default target: the deploy that was live before the publish that
+# produced the deploy live now (read from the payload of the recorded GitHub Deployments).
 # OFF until switch day: gated by the repo variable RELEASE_FLOW_ENABLED.
 on:
   workflow_dispatch:
     inputs:
       deploy_id:
-        description: "Netlify deploy id to restore (optional; default = deploy live before the last publish)"
+        description: "Netlify deploy id to restore (optional; default = the deploy that was live before the last publish)"
         required: false
 
 concurrency:
@@ -24,51 +24,58 @@ jobs:
     if: ${{ vars.RELEASE_FLOW_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-      SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID }}
-      SITE_NAME: ${{ vars.NETLIFY_PRODUCTION_SITE }}
+      # Production site (closeer-empresas-production). Not a secret: the variables only override the fallback.
+      SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID || 'ecaf0137-9763-432e-8257-59cb5a828116' }}
+      SITE_NAME: ${{ vars.NETLIFY_PRODUCTION_SITE || 'closeer-empresas-production' }}
       INPUT_DEPLOY: ${{ inputs.deploy_id }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Resolve the target deploy
+        id: target
         run: |
           API=https://api.netlify.com/api/v1
           H="Authorization: Bearer $NETLIFY_AUTH_TOKEN"
           CUR=$(curl -fsS -H "$H" "$API/sites/$SITE_ID" | jq -r '.published_deploy.id')
-          TARGET="$INPUT_DEPLOY"
-          if [ -z "$TARGET" ]; then
-            TARGET=$(gh api "repos/$GITHUB_REPOSITORY/deployments?environment=production&per_page=50" \
-              --jq "[.[] | select(.payload.deployId == \"$CUR\")][0].payload.previousDeployId // empty")
-            [ -n "$TARGET" ] || { echo "::error::No recorded publish for the live deploy $CUR; pass deploy_id explicitly."; exit 1; }
-          fi
-          [ "$TARGET" != "$CUR" ] || { echo "::error::Target $TARGET is already the live deploy."; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/deployments?environment=production&per_page=50" > deployments.json
+          # The script checks the id (24 hex chars) before it reaches the URL below.
+          GITHUB_OUTPUT=target.out CURRENT_DEPLOY="$CUR" node .github/scripts/release-flow/cli.js rollback-target < deployments.json
+          TARGET=$(sed -n 's/^target=//p' target.out)
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
           STATE=$(curl -fsS -H "$H" "$API/sites/$SITE_ID/deploys/$TARGET" | jq -r .state)
           [ "$STATE" = ready ] || { echo "::error::Target deploy $TARGET is not ready (state=$STATE)."; exit 1; }
-          echo "CUR=$CUR" >> "$GITHUB_ENV"
-          echo "TARGET=$TARGET" >> "$GITHUB_ENV"
-          echo "MASTER_BEFORE=$(gh api repos/$GITHUB_REPOSITORY/git/ref/heads/master --jq .object.sha)" >> "$GITHUB_ENV"
+          echo "cur=$CUR" >> "$GITHUB_OUTPUT"
+          echo "master_before=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq .object.sha)" >> "$GITHUB_OUTPUT"
       - name: Restore (lock kept)
+        env:
+          CUR: ${{ steps.target.outputs.cur }}
+          TARGET: ${{ steps.target.outputs.target }}
+          MASTER_BEFORE: ${{ steps.target.outputs.master_before }}
         run: |
           API=https://api.netlify.com/api/v1
           H="Authorization: Bearer $NETLIFY_AUTH_TOKEN"
           curl -fsS -X POST -H "$H" "$API/sites/$SITE_ID/deploys/$TARGET/restore" | jq '{id, state, published_at}'
-          for i in $(seq 1 12); do
+          for _ in $(seq 1 12); do
             NOW=$(curl -fsS -H "$H" "$API/sites/$SITE_ID" | jq -r '[.published_deploy.id, .published_deploy.locked] | @tsv')
             [ "${NOW%%$'\t'*}" = "$TARGET" ] && break
             sleep 3
           done
           [ "${NOW%%$'\t'*}" = "$TARGET" ] || { echo "::error::Published deploy is not the target after restore ($NOW)"; exit 1; }
-          MASTER_AFTER=$(gh api repos/$GITHUB_REPOSITORY/git/ref/heads/master --jq .object.sha)
+          MASTER_AFTER=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq .object.sha)
           {
             echo "### Rollback"
             echo "- published deploy: \`$CUR\` -> \`$TARGET\` (locked: ${NOW##*$'\t'})"
-            echo "- master unchanged: \`${MASTER_BEFORE:0:7}\` -> \`${MASTER_AFTER:0:7}\`"
-            echo "- do NOT use pre-producao-- or master-- URLs to check production now; use https://$SITE_NAME.netlify.app"
+            echo "- master did not move: \`${MASTER_BEFORE:0:7}\` -> \`${MASTER_AFTER:0:7}\`. It stays ahead of production until a hotfix (a hotfix after a rollback starts from master and republishes what was rolled back)."
+            echo "- **Do NOT use \`pre-producao--\` or \`master--\` to check production now: they do not show it.** Use https://$SITE_NAME.netlify.app"
           } | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Record the GitHub Deployment
-        run: |
-          PAYLOAD=$(jq -cn --arg d "$TARGET" --arg p "$CUR" '{deployId:$d, previousDeployId:$p, tag:"rollback", source:"rollback"}')
+          PAYLOAD=$(jq -cn --arg d "$TARGET" --arg p "$CUR" '{deployId:$d, previousDeployId:$p, tag:"rollback"}')
           DID=$(jq -n --arg ref "$MASTER_BEFORE" --arg desc "Rollback to deploy $TARGET" --argjson payload "$PAYLOAD" \
             '{ref:$ref, environment:"production", auto_merge:false, required_contexts:[], description:$desc, payload:$payload}' \
             | gh api -X POST "repos/$GITHUB_REPOSITORY/deployments" --input - --jq .id)

@@ -1,6 +1,88 @@
-[build]
-  command = "yarn build"
-  publish = "build"
+# ============================
+# Build
+# ============================
 
-# REACT_APP_* style variables are set per Netlify site (preview/staging: staging URL,
-# production: production URL). They are baked into the static output at build time.
+# Node 24 LTS — anda junto com o .nvmrc e o engines.node (package.json).
+# No Netlify o .nvmrc vem primeiro; este NODE_VERSION é a reserva e, por
+# estar no netlify.toml, vale mais que o NODE_VERSION das settings do site.
+# Ref.: https://docs.netlify.com/build/configure-builds/available-software-at-build-time/
+[build.environment]
+  NODE_VERSION = "24"
+
+# ============================
+# Secret scanning
+# ============================
+
+# As chaves client-side deste app são públicas por design e vão para o bundle de qualquer forma: 
+# REACT_APP_GOOGLE_API_KEY (Maps JS API em public/index.html),
+# REACT_APP_BUGSNAG_API_KEY (notifier key), 
+# REACT_APP_ONESIGNAL (appId) e
+# REACT_APP_ANALYTICS_ID (measurement ID do GA). Para o secret scanning do Netlify
+# elas são falso-positivos, não segredos.
+#
+# O safelist do SMART DETECTION exige os VALORES literais das chaves, por isso ele
+# NÃO vive aqui — mora na UI do Netlify (Project configuration → Environment
+# variables) de cada site, para não versionar segredo nenhum:
+#   SECRETS_SCAN_SMART_DETECTION_OMIT_VALUES
+#
+# Neste arquivo ficam só NOMES de chave, que não carregam material secreto.
+# Ref.: https://docs.netlify.com/manage/security/secret-scanning/
+#
+# Continua na tabela [build.environment] lá de cima — o TOML não deixa repeti-la.
+  SECRETS_SCAN_OMIT_KEYS = "REACT_APP_GOOGLE_API_KEY,REACT_APP_BUGSNAG_API_KEY,REACT_APP_ONESIGNAL,REACT_APP_ANALYTICS_ID"
+
+# ============================
+# Redirects (SPA)
+# ============================
+
+# 1️⃣ Tratar recursos estáticos inexistentes
+[[redirects]]
+  from = "/static/*"
+  to = "/static/:splat"
+  status = 404
+  force = true
+
+# Fallback SPA: qualquer rota sem arquivo real cai no index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# ============================
+# Headers
+# ============================
+
+# Segurança → todas as rotas
+# frame-ancestors bloqueia o enquadramento (clickjacking); X-Frame-Options fica
+# como fallback legado — quando os dois existem, o CSP prevalece.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "frame-ancestors 'none'"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# JS e CSS versionados do /static/ → cache longo (1 ano, immutable)
+[[headers]]
+  for = "/static/*.{js,css}"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Imagens públicas → cache de 1 dia
+[[headers]]
+  for = "/*.{png,jpg,jpeg,gif,svg,webp,ico}"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+# Imagens versionadas do /static/ → cache longo (1 ano)
+[[headers]]
+  for = "/static/*.{png,jpg,jpeg,gif,svg,webp,ico}"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# HTML → nunca cachear (garante que o browser pega sempre a versão mais nova)
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "no-cache"

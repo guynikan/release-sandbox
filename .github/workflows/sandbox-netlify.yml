@@ -1,0 +1,64 @@
+name: Sandbox Netlify
+
+# Sandbox-only helper, FIXED allowlist: `inspect` (read-only) and `build-settings` (sets the production site
+# build command/publish dir in the site settings, as in the real repo where netlify.toml has no build command).
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "inspect | build-settings"
+        required: true
+        default: inspect
+        type: choice
+        options: [inspect, build-settings]
+      deploy_id:
+        description: "inspect: also describe this deploy id (optional)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID }}
+      EXTRA: ${{ inputs.deploy_id }}
+      ACTION: ${{ inputs.action }}
+    steps:
+      - name: Set the build command in the site settings
+        if: inputs.action == 'build-settings'
+        run: |
+          API=https://api.netlify.com/api/v1
+          H="Authorization: Bearer $NETLIFY_AUTH_TOKEN"
+          BODY=$(curl -fsS -H "$H" "$API/sites/$SITE_ID" | jq '{repo: (.build_settings | .cmd="yarn build" | .dir="build")}')
+          curl -fsS -X PATCH -H "$H" -H 'Content-Type: application/json' "$API/sites/$SITE_ID" -d "$BODY" \
+            | jq '{cmd: .build_settings.cmd, dir: .build_settings.dir}' | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Describe the production site
+        run: |
+          API=https://api.netlify.com/api/v1
+          H="Authorization: Bearer $NETLIFY_AUTH_TOKEN"
+          get() { curl -fsS -H "$H" "$API/$1"; }
+          describe() {
+            ID="$1"
+            get "sites/$SITE_ID/deploys/$ID" | jq -r '"deploy \(.id) state=\(.state) context=\(.context) branch=\(.branch) title=\(.title) commit_ref=\(.commit_ref) created=\(.created_at) published=\(.published_at) locked=\(.locked)"'
+            echo "  index.html sha1: $(get "deploys/$ID/files" | jq -r '.[] | select(.id=="/index.html") | .sha')"
+          }
+          SITE=$(get "sites/$SITE_ID")
+          PUB=$(jq -r '.published_deploy.id' <<<"$SITE")
+          {
+            echo "### Production site"
+            echo '```'
+            echo "build_settings: cmd=$(jq -r '.build_settings.cmd' <<<"$SITE") dir=$(jq -r '.build_settings.dir' <<<"$SITE")"
+            echo "published deploy: $PUB (locked=$(jq -r '.published_deploy.locked' <<<"$SITE"))"
+            describe "$PUB"
+            echo "--- pre-producao alias (latest deploy of branch pre-producao)"
+            ALIAS=$(get "sites/$SITE_ID/deploys?branch=pre-producao&per_page=1" | jq -r '.[0].id')
+            describe "$ALIAS"
+            [ -n "$EXTRA" ] && { echo "--- requested deploy"; describe "$EXTRA"; }
+            echo "--- last 6 deploys"
+            get "sites/$SITE_ID/deploys?per_page=6" | jq -r '.[] | "\(.id) \(.state) ctx=\(.context) branch=\(.branch) created=\(.created_at) published=\(.published_at)"'
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
