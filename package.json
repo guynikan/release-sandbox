@@ -1,6 +1,6 @@
 {
   "name": "release-sandbox",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "private": true,
   "description": "Fictional static app used to exercise a release-please based release flow",
   "license": "MIT",
