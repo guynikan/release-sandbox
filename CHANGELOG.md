@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.17.1](https://github.com/guynikan/release-sandbox/compare/0.16.2...0.17.1) (2026-11-09)
+
+
+### Novidades
+
+* **SBX-1401:** show the loyalty points ([#187](https://github.com/guynikan/release-sandbox/issues/187)) ([631d688](https://github.com/guynikan/release-sandbox/commit/631d68869630a274a9796de2a5ad48825ba33fa9))
+
+
+### Tarefas técnicas
+
+* release 0.17.0 ([#188](https://github.com/guynikan/release-sandbox/issues/188)) ([4ff319c](https://github.com/guynikan/release-sandbox/commit/4ff319cc6f2857889c87dd1bd3c47c1f626f53c5))
+* release 0.17.1 ([#194](https://github.com/guynikan/release-sandbox/issues/194)) ([82f6462](https://github.com/guynikan/release-sandbox/commit/82f64622fa7ee97f7dbea71978f52512ee3f107c))
+* release 0.17.1 ([#195](https://github.com/guynikan/release-sandbox/issues/195)) ([f2ed680](https://github.com/guynikan/release-sandbox/commit/f2ed6800daefd02d6bf0018f16c3b1e36991cb7b))
+
+## [0.17.0](https://github.com/guynikan/release-sandbox/compare/0.16.1...0.17.0) (2026-11-09)
+
+
+### Novidades
+
+* **SBX-1401:** show the loyalty points ([#187](https://github.com/guynikan/release-sandbox/issues/187)) ([631d688](https://github.com/guynikan/release-sandbox/commit/631d68869630a274a9796de2a5ad48825ba33fa9))
+
 ## [0.16.1](https://github.com/guynikan/release-sandbox/compare/0.16.0...0.16.1) (2026-11-09)
 
 
