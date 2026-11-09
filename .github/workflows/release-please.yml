@@ -53,8 +53,6 @@ jobs:
         shell: bash
     env:
       TAG: ${{ needs.release-please.outputs.tag_name || inputs.redo_draft_tag }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
       # Production site (closeer-empresas-production). Not a secret: the variables only override the fallback.
       NETLIFY_SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID || 'ecaf0137-9763-432e-8257-59cb5a828116' }}
       SITE_NAME: ${{ vars.NETLIFY_PRODUCTION_SITE || 'closeer-empresas-production' }}
@@ -80,16 +78,23 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: yarn
+      # Install scripts are kept on purpose: @bugsnag/cli (used by the sourcemap upload of webpack-bugsnag-plugins)
+      # fetches its binary in a postinstall. No token is in the environment of this step.
       - run: yarn install --frozen-lockfile
       # `netlify build --context production` takes the build command from the Netlify site settings (netlify.toml
-      # has none: proved in the sandbox) and the production-context variables from the site, so REACT_APP_* are NOT
+      # has none: verified) and the production-context variables from the site, so REACT_APP_* are NOT
       # duplicated in GitHub. With REACT_APP_RELEASE_STAGE=production on the site, craco uploads the sourcemaps to
       # Bugsnag and the postbuild removes the .map files from build/.
       - name: Build the tag with the production settings of the Netlify site
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
         run: |
           npx --yes "netlify-cli@$NETLIFY_CLI_VERSION" build --context production 2>&1 | tee build.log
           test -f build/index.html || { echo "::error::build/index.html is missing: the Netlify build did not run a build command (is the command set in the site settings?)"; exit 1; }
       - name: Deploy as a draft on pre-producao (no --prod, no rebuild)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
         run: |
           API=https://api.netlify.com/api/v1
           PREVIOUS=$(curl -fsS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" "$API/sites/$NETLIFY_SITE_ID" | jq -r '.published_deploy.id')
@@ -113,6 +118,8 @@ jobs:
           echo "COMMIT=$COMMIT" >> "$GITHUB_ENV"
       # The branch is frozen at the tag: a feature that enters next-release after the tag never rides in this PR.
       - name: Open the PR publish/X.Y.Z -> master
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BRANCH="publish/$TAG"
           if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" >/dev/null 2>&1; then

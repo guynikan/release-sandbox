@@ -5,17 +5,21 @@
 const HEAD_REF_RE = /^(publish|hotfix)\/[A-Za-z0-9._-]+$/;
 const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)$/;
 const SHA_RE = /^[0-9a-f]{40}$/;
+const DEPLOY_ID_RE = /^[0-9a-f]{24}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const WORKFLOWS_DIR = ".github/workflows/";
 
 /**
  * Classifies the head branch of the PR that was merged into master.
  * Only a strict pattern is accepted for publish/* and hotfix/*: branch names are attacker-chosen text.
  * @param {string|null|undefined} ref
- * @returns {{kind: "publish"|"hotfix"|"other", version?: string}}
+ * A publish/ or hotfix/ name with unusual characters is never acted on: it is "other" with `unusual: true`
+ * (nothing is published either way), so the run can skip with a note instead of failing.
+ * @returns {{kind: "publish"|"hotfix"|"other", version?: string, unusual?: boolean}}
  */
 function classifyHeadRef(ref) {
   if (typeof ref !== "string" || !/^(publish|hotfix)\//.test(ref)) return { kind: "other" };
-  if (!HEAD_REF_RE.test(ref)) throw new Error("Unexpected branch name");
+  if (!HEAD_REF_RE.test(ref)) return { kind: "other", unusual: true };
   const [kind, rest] = ref.split("/");
   return kind === "publish" ? { kind, version: rest } : { kind };
 }
@@ -135,7 +139,11 @@ function validateDeployState(state) {
   if (!["release", "hotfix"].includes(state.kind)) throw new Error(`deploy-state.json: unknown kind "${state.kind}"`);
   if (!SHA_RE.test(state.commit)) throw new Error('deploy-state.json: "commit" is not a full SHA');
   if (!SHA_RE.test(state.tree)) throw new Error('deploy-state.json: "tree" is not a full SHA');
-  if (typeof state.previousDeployId !== "string") throw new Error('deploy-state.json: "previousDeployId" must be a string');
+  if (!DEPLOY_ID_RE.test(state.draftDeployId)) throw new Error('deploy-state.json: "draftDeployId" is not a Netlify deploy id');
+  if (typeof state.previousDeployId !== "string" || (state.previousDeployId !== "" && !DEPLOY_ID_RE.test(state.previousDeployId))) {
+    throw new Error('deploy-state.json: "previousDeployId" must be empty or a Netlify deploy id');
+  }
+  if (!UUID_RE.test(state.siteId)) throw new Error('deploy-state.json: "siteId" is not a site UUID');
   return state;
 }
 
@@ -151,8 +159,10 @@ function parseDeployState(text) {
 
 /**
  * Decides what publish.yml does for a push to master. Publishing needs a draft AND an identical tree:
- * - not the merge of a publish/* or hotfix/* PR, or no draft exists -> skip (green, with a note);
- * - a draft exists but master differs from it (tree, tag commit, branch head changed) -> fail, nothing published.
+ * - not the merge of a publish/* or hotfix/* PR, or a hotfix/* PR with no hotfix-* tag at its head
+ *   (ordinary work) -> skip (green, with a note);
+ * - publish/* with no tag/Release or no deploy-state.json, a hotfix tag without deploy-state.json, or a draft
+ *   that master/branch does not match (tree, tag commit, changed head) -> fail (red), nothing published.
  * @param {object} f facts gathered by the workflow
  * @param {"publish"|"hotfix"|"other"} f.kind
  * @param {string} [f.headSha] head of the merged PR
@@ -169,22 +179,29 @@ function decidePublish(f) {
     return { action: "skip", reason: "this push is not the merge of a publish/* or hotfix/* PR" };
   }
   if (!f.draftTag) {
-    if (f.kind === "hotfix" && f.staleHotfixTag) {
-      return {
-        action: "fail",
-        reason: `the PR has a hotfix draft (${f.staleHotfixTag}) but its head ${String(f.headSha).slice(0, 7)} is not the drafted commit: the branch changed after the draft. Nothing was published; delete that Release and its tags (${f.staleHotfixTag} and the plain ${f.staleHotfixTag.replace(/^hotfix-/, "")}) and run hotfix-draft again`,
-      };
+    if (f.kind === "hotfix") {
+      if (f.staleHotfixTag) {
+        const plain = f.staleHotfixTag.replace(/^hotfix-/, "");
+        return {
+          action: "fail",
+          reason: `the PR was merged but its head ${String(f.headSha).slice(0, 7)} is not the commit of its hotfix draft (${f.staleHotfixTag}): the branch changed after the draft. master already has the hotfix content and the bumped version, and production does NOT. Nothing was published. The PR is already merged, so it cannot be redone: open a new hotfix/* PR from master and run hotfix-draft (it creates the next patch). Deleting the stale ${f.staleHotfixTag} Release and tags ${f.staleHotfixTag} and ${plain} is only cleanup`,
+        };
+      }
+      return { action: "skip", reason: "this hotfix/* PR has no hotfix draft, so it is treated as ordinary work" };
     }
     return {
-      action: "skip",
-      reason:
-        f.kind === "hotfix"
-          ? "this hotfix/* PR has no hotfix draft, so it is treated as ordinary work"
-          : "no release for this publish/* branch, so there is no draft",
+      action: "fail",
+      reason: `there is no tag/Release for this publish/* branch, so there is no draft. Nothing was published. If the release exists, redo the draft: run release-please.yml with the redo_draft_tag input set to the release tag, then publish again`,
     };
   }
   if (!f.state) {
-    return { action: "skip", reason: `Release ${f.draftTag} has no deploy-state.json, so there is no draft` };
+    return {
+      action: "fail",
+      reason:
+        f.kind === "publish"
+          ? `Release ${f.draftTag} has no deploy-state.json, so the draft was not created. Nothing was published. Run release-please.yml with the redo_draft_tag input set to ${f.draftTag}, then publish again`
+          : `${f.draftTag} is at the PR head but its Release has no deploy-state.json, so the draft is incomplete. Nothing was published. Open a new hotfix/* PR from master and run hotfix-draft`,
+    };
   }
   const { state } = f;
   if (state.tag !== f.draftTag) {

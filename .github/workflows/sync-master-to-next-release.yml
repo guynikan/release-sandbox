@@ -35,7 +35,7 @@ jobs:
       - name: Sync master into next-release
         id: sync
         run: .github/scripts/sync-pr.sh next-release master "Sync master into next-release"
-      # The merge above was made with GITHUB_TOKEN, so its push to release triggers nothing.
+      # The merge above was made with GITHUB_TOKEN, so its push to next-release triggers nothing.
       - name: Dispatch the next-release workflows
         if: steps.sync.outputs.merged == 'true'
         run: |
