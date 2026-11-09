@@ -50,12 +50,14 @@ const commands = {
     const repo = requireEnv("GITHUB_REPOSITORY");
     const raw = readStdin().trim();
     const pr = lib.pickMergedPr(raw ? JSON.parse(raw) : [], { sha, repo });
-    const { kind, version } = lib.classifyHeadRef(pr?.headRef);
+    const { kind, version, unusual } = lib.classifyHeadRef(pr?.headRef);
     setOutput("kind", kind);
     if (kind === "other") {
       setOutput("act", "false");
+      const shown = pr ? pr.headRef.replace(/[^A-Za-z0-9._/-]/g, "?") : "none";
+      const note = unusual ? " The branch name has unusual characters, so it is never treated as a publish or hotfix branch." : "";
       summary(
-        `### Publish skipped\nPush \`${sha.slice(0, 7)}\` to master is not the merge of a \`publish/*\` or \`hotfix/*\` PR (PR head: \`${pr ? pr.headRef.replace(/[`\r\n]/g, "") : "none"}\`). Nothing was published.`,
+        `### Publish skipped\nPush \`${sha.slice(0, 7)}\` to master is not the merge of a \`publish/*\` or \`hotfix/*\` PR (PR head: \`${shown}\`).${note} Nothing was published.`,
       );
       return;
     }
