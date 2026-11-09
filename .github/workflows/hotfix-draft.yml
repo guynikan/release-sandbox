@@ -2,10 +2,14 @@ name: Hotfix draft
 
 # Guardian-triggered for a hotfix PR (base master, head hotfix/*). Updates the branch with master when it is
 # behind, squashes it into ONE commit `hotfix(KEY): ...` (a type release-please ignores, so the hotfix never
-# lands in the next changelog) plus a patch bump commit with a non-conventional message, builds the head with
-# the production context and uploads it as the draft on pre-producao, then creates the tag `hotfix-X.Y.Z`
-# (deliberately NOT a semver tag) and a GitHub Release carrying deploy-state.json.
+# lands in the next changelog) plus a patch bump commit (package.json + .release-please-manifest.json) with a
+# non-conventional message, renames the PR to `hotfix(KEY): ...`, builds the head with the production settings
+# of the Netlify site and uploads it as the draft on pre-producao. Then it creates the tag `hotfix-X.Y.Z`
+# (deliberately NOT semver) with a GitHub Release carrying deploy-state.json, and the plain tag `X.Y.Z` on the
+# previous release commit (the one the manifest on master cited), so release-please keeps its anchor.
 # The guardian smoke tests the draft and merges the PR with a MERGE COMMIT; publish.yml publishes.
+# A hotfix that changes .github/workflows/* cannot be pushed with GITHUB_TOKEN: it fails early with a message
+# and the guardian merges that PR by hand.
 # OFF until switch day: gated by the repo variable RELEASE_FLOW_ENABLED.
 on:
   workflow_dispatch:
@@ -26,60 +30,63 @@ jobs:
   hotfix-draft:
     if: ${{ vars.RELEASE_FLOW_ENABLED == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
     env:
       PR: ${{ inputs.pr }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-      NETLIFY_SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID }}
-      SITE_NAME: ${{ vars.NETLIFY_PRODUCTION_SITE }}
+      # Production site (closeer-empresas-production). Not a secret: the variables only override the fallback.
+      NETLIFY_SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID || 'ecaf0137-9763-432e-8257-59cb5a828116' }}
+      SITE_NAME: ${{ vars.NETLIFY_PRODUCTION_SITE || 'closeer-empresas-production' }}
+      NETLIFY_CLI_VERSION: "23.15.1"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
+          persist-credentials: false
+      # Scripts are copied out of the workspace: the next steps switch it to the hotfix branch.
+      - name: Keep the flow scripts
+        run: cp -r .github/scripts/release-flow "$RUNNER_TEMP/release-flow"
       - name: Verify the PR
         run: |
+          [[ "$PR" =~ ^[0-9]+$ ]] || { echo "::error::PR must be a number"; exit 1; }
           gh pr view "$PR" --json state,baseRefName,headRefName,title,url,isCrossRepository > pr.json
           jq -r '"PR \(.url): base=\(.baseRefName) head=\(.headRefName) state=\(.state)"' pr.json
           [ "$(jq -r .state pr.json)" = "OPEN" ] || { echo "::error::PR is not open"; exit 1; }
           [ "$(jq -r .baseRefName pr.json)" = "master" ] || { echo "::error::PR base must be master"; exit 1; }
           [ "$(jq -r .isCrossRepository pr.json)" = "false" ] || { echo "::error::Fork PRs are not supported"; exit 1; }
           HEAD=$(jq -r .headRefName pr.json)
-          case "$HEAD" in hotfix/*) ;; *) echo "::error::Head branch must start with hotfix/"; exit 1;; esac
-          echo "HEAD_REF=$HEAD" >> "$GITHUB_ENV"
-          echo "PR_TITLE=$(jq -r .title pr.json)" >> "$GITHUB_ENV"
-          echo "PR_URL=$(jq -r .url pr.json)" >> "$GITHUB_ENV"
-      - name: Compute the next patch from the version on master
+          [[ "$HEAD" =~ ^hotfix/[A-Za-z0-9._-]+$ ]] || { echo "::error::Head branch must be hotfix/<name> (letters, digits, . _ -)"; exit 1; }
+          {
+            echo "HEAD_REF=$HEAD"
+            echo "PR_TITLE=$(jq -r .title pr.json | tr -d '\r\n')"
+            echo "PR_URL=$(jq -r .url pr.json)"
+          } >> "$GITHUB_ENV"
+      - name: Refuse a PR that changes .github/workflows
         run: |
-          CURRENT=$(git show origin/master:package.json | jq -r .version)
-          IFS=. read -r MAJ MIN PAT <<< "$CURRENT"
-          NEXT="$MAJ.$MIN.$((PAT + 1))"
-          for T in "hotfix-$NEXT" "v$NEXT" "$NEXT"; do
-            git rev-parse -q --verify "refs/tags/$T" >/dev/null && { echo "::error::Tag $T already exists"; exit 1; }
-          done
-          # release-please looks for the tag named like the version in the manifest. After the hotfix bump reaches
-          # next-release (sync) that version is NEXT, and only hotfix-NEXT exists, so it would find no release and
-          # recount the whole history. A plain tag NEXT on the commit of the CURRENT release keeps the changelog
-          # anchor where it was (a tag on the hotfix commit itself would hide the PRs already merged on next-release).
-          BASE_V=$(git show origin/master:.release-please-manifest.json | jq -r '.["."]')
-          ANCHOR_TAG=""
-          for T in "$BASE_V" "v$BASE_V"; do
-            git rev-parse -q --verify "refs/tags/$T" >/dev/null && { ANCHOR_TAG="$T"; break; }
-          done
-          [ -n "$ANCHOR_TAG" ] || { echo "::error::No release tag for manifest version $BASE_V"; exit 1; }
-          echo "ANCHOR_SHA=$(git rev-list -n1 "refs/tags/$ANCHOR_TAG")" >> "$GITHUB_ENV"
-          echo "PLAIN_TAG=${ANCHOR_TAG/$BASE_V/$NEXT}" >> "$GITHUB_ENV"
-          echo "CURRENT=$CURRENT" >> "$GITHUB_ENV"
-          echo "NEXT=$NEXT" >> "$GITHUB_ENV"
-          echo "TAG=hotfix-$NEXT" >> "$GITHUB_ENV"
-          echo "Next patch: $CURRENT -> $NEXT"
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename' \
+            | node "$RUNNER_TEMP/release-flow/cli.js" workflow-files
+      - name: Plan the version, the tags and the title
+        id: plan
+        run: |
+          PACKAGE_VERSION=$(git show origin/master:package.json | jq -r .version) \
+          MANIFEST_VERSION=$(git show origin/master:.release-please-manifest.json | jq -r '.["."]') \
+          TAGS=$(git tag -l) \
+            node "$RUNNER_TEMP/release-flow/cli.js" hotfix-plan
+          ANCHOR_TAG=$(sed -n 's/^anchor_tag=//p' "$GITHUB_OUTPUT")
+          echo "anchor_sha=$(git rev-list -n1 "refs/tags/$ANCHOR_TAG")" >> "$GITHUB_OUTPUT"
       - name: Update with master, squash into hotfix(KEY) and add the patch bump commit
+        id: squash
+        env:
+          NEXT: ${{ steps.plan.outputs.next }}
+          NEW_TITLE: ${{ steps.plan.outputs.new_title }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          ORIG_SHA=$(git rev-parse "origin/$HEAD_REF")
           git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
           if ! git merge-base --is-ancestor origin/master HEAD; then
             echo "Branch is behind master: merging master into it first"
@@ -89,56 +96,66 @@ jobs:
               exit 1
             fi
           fi
-          # One commit typed hotfix(...): release-please ignores unknown types, so the hotfix is not repeated
-          # in the next changelog once master is merged back into next-release.
-          NEW_TITLE=$(printf '%s' "$PR_TITLE" | sed -E 's/^[a-zA-Z]+(\(|:)/hotfix\1/')
-          case "$NEW_TITLE" in hotfix*) ;; *) NEW_TITLE="hotfix: $NEW_TITLE";; esac
+          # One commit typed hotfix(...): release-please ignores unknown types.
           git reset --soft origin/master
-          git commit -m "$NEW_TITLE (#$PR)"
-          node - <<'JS'
-          const fs = require("node:fs");
-          const { NEXT } = process.env;
-          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-          pkg.version = NEXT;
-          fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
-          const manifest = JSON.parse(fs.readFileSync(".release-please-manifest.json", "utf8"));
-          manifest["."] = NEXT;
-          fs.writeFileSync(".release-please-manifest.json", JSON.stringify(manifest, null, 2) + "\n");
-          JS
+          printf '%s (#%s)\n' "$NEW_TITLE" "$PR" > "$RUNNER_TEMP/commit-msg"
+          git commit -q -F "$RUNNER_TEMP/commit-msg"
+          node "$RUNNER_TEMP/release-flow/cli.js" bump-version
           git add package.json .release-please-manifest.json
-          git commit -m "Release $NEXT (hotfix)"
-          git push --force-with-lease origin "HEAD:$HEAD_REF"
+          git commit -q -m "Release $NEXT (hotfix)"
+          # Credentials only for this push (checkout runs with persist-credentials: false). Never a plain --force.
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$AUTH"
+          if ! ERR=$(git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+            push --force-with-lease="refs/heads/$HEAD_REF:$ORIG_SHA" origin "HEAD:refs/heads/$HEAD_REF" 2>&1); then
+            echo "$ERR"
+            echo "::error::Push to $HEAD_REF was refused (${ERR%%$'\n'*}). If the branch changed meanwhile, run hotfix-draft again."
+            exit 1
+          fi
           # The PR title becomes the body of the merge commit: keep it out of the next changelog too.
           gh pr edit "$PR" --title "$NEW_TITLE"
-          echo "COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "TREE=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_ENV"
-      - name: Build with the production context of the Netlify site
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      # Command from the Netlify site settings, variables from the production context of the site (see release-please.yml).
+      - name: Build with the production settings of the Netlify site
         run: |
-          START=$(date +%s)
-          export REACT_APP_COMMIT_SHA=$(git rev-parse HEAD)
-          npx --yes netlify-cli@23 build --context production 2>&1 | tee build.log
-          echo "BUILD_SECONDS=$(( $(date +%s) - START ))" >> "$GITHUB_ENV"
-          test -f build/index.html
-      - name: Deploy the draft on pre-producao and create the tag with deploy-state.json
+          npx --yes "netlify-cli@$NETLIFY_CLI_VERSION" build --context production 2>&1 | tee build.log
+          test -f build/index.html || { echo "::error::build/index.html is missing: the Netlify build did not run a build command (is the command set in the site settings?)"; exit 1; }
+      - name: Deploy the draft on pre-producao, tag it and keep the changelog anchor
+        env:
+          NEXT: ${{ steps.plan.outputs.next }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          PLAIN_TAG: ${{ steps.plan.outputs.plain_tag }}
+          ANCHOR_SHA: ${{ steps.plan.outputs.anchor_sha }}
+          COMMIT: ${{ steps.squash.outputs.commit }}
+          TREE: ${{ steps.squash.outputs.tree }}
         run: |
           API=https://api.netlify.com/api/v1
           PREVIOUS=$(curl -fsS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" "$API/sites/$NETLIFY_SITE_ID" | jq -r '.published_deploy.id')
-          npx --yes netlify-cli@23 deploy --no-build --dir build --site "$NETLIFY_SITE_ID" --alias pre-producao --json > deploy.json
+          npx --yes "netlify-cli@$NETLIFY_CLI_VERSION" deploy --no-build --dir build --site "$NETLIFY_SITE_ID" --alias pre-producao --json > deploy.json
           DRAFT=$(jq -r '.deploy_id' deploy.json)
           [ -n "$DRAFT" ] && [ "$DRAFT" != null ] || { echo "::error::Netlify did not return a deploy id"; exit 1; }
-          jq -n --arg kind hotfix --arg tag "$TAG" --arg version "$NEXT" --arg commit "$COMMIT" --arg tree "$TREE" \
-            --arg draft "$DRAFT" --arg prev "$PREVIOUS" --arg site "$NETLIFY_SITE_ID" --arg pr "$PR" --arg at "$(date -u +%FT%TZ)" \
-            '{kind:$kind, tag:$tag, version:$version, commit:$commit, tree:$tree, draftDeployId:$draft, previousDeployId:$prev, siteId:$site, pr:($pr|tonumber), createdAt:$at}' > deploy-state.json
+          KIND=hotfix VERSION="$NEXT" DRAFT_DEPLOY_ID="$DRAFT" PREVIOUS_DEPLOY_ID="$PREVIOUS" SITE_ID="$NETLIFY_SITE_ID" \
+            node "$RUNNER_TEMP/release-flow/cli.js" deploy-state
           cat deploy-state.json
+          # The notes keep "<PR url>)" : publish.yml uses it to recognise a draft whose branch changed afterwards.
           gh release create "$TAG" deploy-state.json --target "$COMMIT" --title "$TAG" \
             --notes "Hotfix $NEXT: $PR_TITLE ($PR_URL). Draft deploy $DRAFT."
+          # Plain tag on the previous release commit, not on the hotfix: release-please looks for the tag named
+          # like the manifest version, and a tag on the hotfix commit would hide PRs already merged on next-release.
           gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$PLAIN_TAG" -f sha="$ANCHOR_SHA" >/dev/null
           {
             echo "### Hotfix draft $TAG"
-            echo "- plain tag \`$PLAIN_TAG\` -> \`${ANCHOR_SHA:0:7}\` (changelog anchor of the current release, not the hotfix)"
-            echo "- draft deploy: \`$DRAFT\` (previous published: \`$PREVIOUS\`), build ${BUILD_SECONDS}s"
+            echo "- plain tag \`$PLAIN_TAG\` -> \`${ANCHOR_SHA:0:7}\` (changelog anchor of the previous release, not the hotfix)"
+            echo "- draft deploy: \`$DRAFT\` (published today: \`$PREVIOUS\`)"
             echo "- alias: https://pre-producao--$SITE_NAME.netlify.app"
             echo "- permalink: https://$DRAFT--$SITE_NAME.netlify.app"
             echo "- commit \`$COMMIT\`, tree \`$TREE\`"
-            echo "- smoke test, then merge $PR_URL with a MERGE COMMIT"
+            echo "- smoke test, then merge $PR_URL with a **merge commit**"
+            echo "- after a rollback, master is ahead of production: this hotfix republishes what was rolled back"
           } >> "$GITHUB_STEP_SUMMARY"
