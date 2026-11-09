@@ -22,3 +22,4 @@ Phase D design: no GitHub App; master advances only through a PR merged by a per
 - `next-release` ruleset: PR required, no deletion, no force push.
 - Actions > "Allow GitHub Actions to create and approve pull requests" on.
 - Unused leftovers from phase C: `vars.APP_ID`, `vars.DISPATCH_CHAIN`, secret `APP_PRIVATE_KEY`.
+extra content not in the draft
