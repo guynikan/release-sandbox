@@ -28,9 +28,10 @@ test("classifyHeadRef accepts only strict publish/* and hotfix/* names", () => {
   assert.deepEqual(lib.classifyHeadRef("feature/x"), { kind: "other" });
   assert.deepEqual(lib.classifyHeadRef("release/2.45.0"), { kind: "other" });
   assert.deepEqual(lib.classifyHeadRef(undefined), { kind: "other" });
-  assert.throws(() => lib.classifyHeadRef("hotfix/$(curl evil)"), /Unexpected branch name/);
-  assert.throws(() => lib.classifyHeadRef("publish/a;b"), /Unexpected branch name/);
-  assert.throws(() => lib.classifyHeadRef("hotfix/a b"), /Unexpected branch name/);
+  // Unusual characters: never acted on, but not an error either (the run skips with a note).
+  for (const ref of ["hotfix/$(curl evil)", "publish/a;b", "hotfix/a b", "hotfix/ação", "publish/"]) {
+    assert.deepEqual(lib.classifyHeadRef(ref), { kind: "other", unusual: true }, ref);
+  }
 });
 
 test("pickMergedPr matches merge_commit_sha, base master and same-repo head", () => {
@@ -135,6 +136,17 @@ test("deploy-state: rejects broken files", () => {
   assert.throws(() => lib.parseDeployState(JSON.stringify(state({ commit: "" }))), /"commit"/);
 });
 
+test("deploy-state: validates the Netlify ids and the site UUID", () => {
+  assert.throws(() => lib.parseDeployState(JSON.stringify(state({ draftDeployId: "../etc" }))), /draftDeployId/);
+  assert.throws(() => lib.parseDeployState(JSON.stringify(state({ draftDeployId: DEPLOY.toUpperCase() }))), /draftDeployId/);
+  assert.throws(() => lib.parseDeployState(JSON.stringify(state({ draftDeployId: DEPLOY + "0" }))), /draftDeployId/);
+  assert.throws(() => lib.parseDeployState(JSON.stringify(state({ previousDeployId: "nope" }))), /previousDeployId/);
+  assert.throws(() => lib.parseDeployState(JSON.stringify(state({ previousDeployId: 5 }))), /previousDeployId/);
+  assert.throws(() => lib.parseDeployState(JSON.stringify(state({ siteId: "closeer-empresas-production" }))), /siteId/);
+  // previousDeployId may be empty (first publish)
+  assert.equal(lib.parseDeployState(JSON.stringify(state({ previousDeployId: "" }))).previousDeployId, "");
+});
+
 const publishFacts = (over = {}) => ({
   kind: "publish",
   headSha: "d".repeat(40),
@@ -157,9 +169,21 @@ test("decidePublish: skip when the push is not a publish/hotfix merge", () => {
   assert.equal(lib.decidePublish({ kind: "other" }).action, "skip");
 });
 
-test("decidePublish: publish/* without a release or without deploy-state is a green skip", () => {
-  assert.equal(lib.decidePublish(publishFacts({ draftTag: "", state: null })).action, "skip");
-  assert.equal(lib.decidePublish(publishFacts({ state: null })).action, "skip");
+test("decidePublish: publish/* without a release or without deploy-state fails with the recovery path", () => {
+  const noTag = lib.decidePublish(publishFacts({ draftTag: "", state: null }));
+  assert.equal(noTag.action, "fail");
+  assert.match(noTag.reason, /redo_draft_tag/);
+  const noState = lib.decidePublish(publishFacts({ state: null }));
+  assert.equal(noState.action, "fail");
+  assert.match(noState.reason, /redo_draft_tag/);
+  assert.match(noState.reason, /2\.46\.0/);
+});
+
+test("decidePublish: a hotfix tag at the head without deploy-state fails", () => {
+  const d = lib.decidePublish({ kind: "hotfix", headSha: SHA, draftTag: "hotfix-2.46.1", state: null });
+  assert.equal(d.action, "fail");
+  assert.match(d.reason, /no deploy-state\.json/);
+  assert.match(d.reason, /new hotfix\/\* PR/);
 });
 
 test("decidePublish: hotfix/* without a draft is ordinary work (skip)", () => {
@@ -173,6 +197,11 @@ test("decidePublish: hotfix branch changed after the draft fails and names the s
   assert.equal(d.action, "fail");
   assert.match(d.reason, /hotfix-2.46.1/);
   assert.match(d.reason, /changed after the draft/);
+  // What happened and the path that exists today (the PR is already merged).
+  assert.match(d.reason, /master already has the hotfix content and the bumped version, and production does NOT/);
+  assert.match(d.reason, /open a new hotfix\/\* PR from master and run hotfix-draft/);
+  assert.match(d.reason, /only cleanup/);
+  assert.doesNotMatch(d.reason, /run hotfix-draft again/);
 });
 
 test("decidePublish: master tree different from the draft tree fails", () => {

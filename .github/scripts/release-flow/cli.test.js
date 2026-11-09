@@ -45,10 +45,13 @@ test("detect-pr acts on publish/* and skips ordinary pushes", () => {
   assert.equal(run("detect-pr", { env, input: "[]" }).outputs.act, "false");
 });
 
-test("detect-pr refuses a hostile branch name", () => {
+test("detect-pr skips (green) with a note on an unusual branch name", () => {
   const r = run("detect-pr", { env: { GITHUB_SHA: SHA, GITHUB_REPOSITORY: repo }, input: JSON.stringify(pr("hotfix/$(id)")) });
-  assert.equal(r.status, 1);
-  assert.match(r.stdout, /Unexpected branch name/);
+  assert.equal(r.status, 0);
+  assert.equal(r.outputs.act, "false");
+  assert.match(r.summary, /unusual characters/);
+  assert.match(r.summary, /Nothing was published/);
+  assert.doesNotMatch(r.summary, /\$\(id\)/);
 });
 
 test("decide-publish exits non-zero only when it refuses", () => {
@@ -56,7 +59,7 @@ test("decide-publish exits non-zero only when it refuses", () => {
   const file = path.join(dir, "deploy-state.json");
   fs.writeFileSync(
     file,
-    JSON.stringify({ kind: "release", tag: "2.46.0", version: "2.46.0", commit: SHA, tree: TREE, draftDeployId: "6aede3b442a3dfda60fbbc6c", previousDeployId: "", siteId: "s", createdAt: "x" }),
+    JSON.stringify({ kind: "release", tag: "2.46.0", version: "2.46.0", commit: SHA, tree: TREE, draftDeployId: "6aede3b442a3dfda60fbbc6c", previousDeployId: "", siteId: "ecaf0137-9763-432e-8257-59cb5a828116", createdAt: "x" }),
   );
   const base = { KIND: "publish", PR_NUMBER: "3", HEAD_REF: "publish/2.46.0", DRAFT_TAG: "2.46.0", STATE_FILE: file, TAG_COMMIT: SHA, MASTER_TREE: TREE, TAG_TREE: TREE };
   const ok = run("decide-publish", { env: base });
@@ -67,9 +70,12 @@ test("decide-publish exits non-zero only when it refuses", () => {
   assert.equal(bad.status, 1);
   assert.equal(bad.outputs.action, "fail");
   assert.match(bad.summary, /REFUSED/);
-  const none = run("decide-publish", { env: { ...base, DRAFT_TAG: "", STATE_FILE: "" } });
-  assert.equal(none.status, 0);
-  assert.equal(none.outputs.action, "skip");
+  const noRelease = run("decide-publish", { env: { ...base, DRAFT_TAG: "", STATE_FILE: "" } });
+  assert.equal(noRelease.status, 1);
+  assert.equal(noRelease.outputs.action, "fail");
+  const ordinary = run("decide-publish", { env: { ...base, KIND: "hotfix", HEAD_REF: "hotfix/x", DRAFT_TAG: "", STATE_FILE: "" } });
+  assert.equal(ordinary.status, 0);
+  assert.equal(ordinary.outputs.action, "skip");
 });
 
 test("hotfix-plan outputs the tags and the renamed title", () => {
@@ -89,7 +95,7 @@ test("bump-version and deploy-state write their files", () => {
   assert.match(fs.readFileSync(path.join(dir, ".release-please-manifest.json"), "utf8"), /"\.": "2\.46\.1"/);
   const r = run("deploy-state", {
     cwd: dir,
-    env: { KIND: "hotfix", TAG: "hotfix-2.46.1", VERSION: "2.46.1", COMMIT: SHA, TREE, DRAFT_DEPLOY_ID: "6aede3b442a3dfda60fbbc6c", PREVIOUS_DEPLOY_ID: "6aea25c16fb1612f4fb7ac90", SITE_ID: "s", PR: "5" },
+    env: { KIND: "hotfix", TAG: "hotfix-2.46.1", VERSION: "2.46.1", COMMIT: SHA, TREE, DRAFT_DEPLOY_ID: "6aede3b442a3dfda60fbbc6c", PREVIOUS_DEPLOY_ID: "6aea25c16fb1612f4fb7ac90", SITE_ID: "ecaf0137-9763-432e-8257-59cb5a828116", PR: "5" },
   });
   assert.equal(r.status, 0);
   const state = JSON.parse(fs.readFileSync(path.join(dir, "deploy-state.json"), "utf8"));
