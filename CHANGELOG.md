@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.1](https://github.com/guynikan/release-sandbox/compare/0.14.0...0.14.1) (2026-11-09)
+
+
+### Correções
+
+* **SBX-1102:** show a valid order total ([#160](https://github.com/guynikan/release-sandbox/issues/160)) ([4bb0848](https://github.com/guynikan/release-sandbox/commit/4bb0848e4ced85e400a4e3ae0a0a14a1e78bfa10))
+
+## [0.14.0](https://github.com/guynikan/release-sandbox/compare/0.13.0...0.14.0) (2026-11-09)
+
+
+### Novidades
+
+* **SBX-1101:** show the order total on the page ([#158](https://github.com/guynikan/release-sandbox/issues/158)) ([296bdd8](https://github.com/guynikan/release-sandbox/commit/296bdd8bb1fdc2f3a5ee8258573d326a745ba4d9))
+
 ## [0.13.0](https://github.com/guynikan/release-sandbox/compare/0.12.1...0.13.0) (2026-11-09)
 
 
