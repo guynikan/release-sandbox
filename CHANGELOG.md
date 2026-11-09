@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/guynikan/release-sandbox/compare/0.15.0...0.16.0) (2026-11-09)
+
+
+### Novidades
+
+* **SBX-1301:** show the discount badge ([#181](https://github.com/guynikan/release-sandbox/issues/181)) ([02637be](https://github.com/guynikan/release-sandbox/commit/02637be13a2579fb883b69e264defac6b5de76de))
+
 ## [0.15.0](https://github.com/guynikan/release-sandbox/compare/0.14.1...0.15.0) (2026-11-09)
 
 
