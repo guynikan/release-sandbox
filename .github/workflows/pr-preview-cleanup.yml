@@ -1,13 +1,16 @@
 name: PR preview cleanup
 
-# When a PR is closed, deletes the Netlify deploys of its branch on the `empresas-preview` site.
+# Deletes the Netlify deploys of a PR branch on the `empresas-preview` site, only for PRs that had a
+# preview (previews are opt-in by the `preview` label, see pr-preview.yml):
+# - on `closed`: only when the PR still has the `preview` label;
+# - on `unlabeled`: only when the removed label is `preview` (cleans right away, so no deploy is left behind).
 #
 # SECURITY: `pull_request_target` runs the workflow from the base branch with access to secrets.
 # Never check out or execute PR code here; only PR metadata is used, via env vars.
 # This is the only job that holds NETLIFY_AUTH_TOKEN (the preview job only has the build hook URL).
 on:
   pull_request_target:
-    types: [closed]
+    types: [closed, unlabeled]
 
 concurrency:
   group: pr-preview-cleanup-${{ github.event.pull_request.number }}
@@ -18,8 +21,14 @@ permissions:
 
 jobs:
   cleanup:
-    # Skip forks (they never get previews).
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Skip forks (they never get previews). Only PRs that had a preview: `preview` label on close,
+    # or the `preview` label just removed.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (
+        (github.event.action == 'closed' && contains(github.event.pull_request.labels.*.name, 'preview')) ||
+        (github.event.action == 'unlabeled' && github.event.label.name == 'preview')
+      )
     runs-on: ubuntu-latest
     # Worst case ~50 s of delete retries per stuck deploy, per pass, plus the 30 s wait.
     timeout-minutes: 10
