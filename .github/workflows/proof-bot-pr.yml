@@ -1,0 +1,27 @@
+name: Proof bot PR
+
+# Throwaway. Opens PRs with GITHUB_TOKEN (author github-actions[bot]) against the two proof bases.
+on:
+  push:
+    branches: [proof/scan-trigger]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  open:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Open one bot PR per base
+        run: |
+          for BASE in old new; do
+            BR="proof/scan-bot-$BASE"
+            SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/proof/scan-$BASE" --jq .object.sha)
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$BR" >/dev/null 2>&1 || true
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$BR" -f sha="$SHA" >/dev/null
+            gh api -X PUT "repos/$GITHUB_REPOSITORY/contents/proof-bot-$BASE.txt" -f message="chore: proof bot change" -f content="$(echo bot-$BASE | base64)" -f branch="$BR" >/dev/null
+            gh pr create --base "proof/scan-$BASE" --head "$BR" --title "proof: bot PR on $BASE" --body "throwaway" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
