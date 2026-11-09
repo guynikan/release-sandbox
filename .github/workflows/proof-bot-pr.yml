@@ -17,7 +17,6 @@ jobs:
     steps:
       - name: Open one bot PR per base
         run: |
-          # PRs whose diff touches .github/workflows (the head already differs from the base), like the release/publish PRs
           for BASE in old new; do
             gh pr create --repo "$GITHUB_REPOSITORY" --base "proof/scan-$BASE" --head proof/scan-trigger --title "proof: bot PR touching workflows on $BASE" --body "throwaway"
           done
