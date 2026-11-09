@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.15.0](https://github.com/guynikan/release-sandbox/compare/0.14.1...0.15.0) (2026-11-09)
+
+
+### Novidades
+
+* **SBX-1201:** show the shipping estimate ([#177](https://github.com/guynikan/release-sandbox/issues/177)) ([3cebe8b](https://github.com/guynikan/release-sandbox/commit/3cebe8b045722752ec4a62080fb167b0fa7fffb2))
+
+
+### Correções
+
+* **SBX-1202:** show a valid shipping estimate ([#179](https://github.com/guynikan/release-sandbox/issues/179)) ([8435bc3](https://github.com/guynikan/release-sandbox/commit/8435bc3ec0879f82f7a5c161db47edb77d6c6e28))
+
 ## [0.14.1](https://github.com/guynikan/release-sandbox/compare/0.14.0...0.14.1) (2026-11-09)
 
 
