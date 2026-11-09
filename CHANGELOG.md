@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/guynikan/release-sandbox/compare/0.16.1...0.17.0) (2026-11-09)
+
+
+### Novidades
+
+* **SBX-1401:** show the loyalty points ([#187](https://github.com/guynikan/release-sandbox/issues/187)) ([631d688](https://github.com/guynikan/release-sandbox/commit/631d68869630a274a9796de2a5ad48825ba33fa9))
+
 ## [0.16.1](https://github.com/guynikan/release-sandbox/compare/0.16.0...0.16.1) (2026-11-09)
 
 
