@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/guynikan/release-sandbox/compare/0.9.2...0.10.0) (2026-11-09)
+
+
+### Novidades
+
+* **SBX-501:** greeting for phase E D1 ([#115](https://github.com/guynikan/release-sandbox/issues/115)) ([7d818bb](https://github.com/guynikan/release-sandbox/commit/7d818bbc6071ae47a18cf4e12913472f2621e46e))
+
 ## [0.9.2](https://github.com/guynikan/release-sandbox/compare/0.9.1...0.9.2) (2026-11-06)
 
 
