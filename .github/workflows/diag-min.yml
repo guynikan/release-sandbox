@@ -1,0 +1,9 @@
+name: diag min
+on:
+  pull_request_target:
+    types: [opened, closed]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
