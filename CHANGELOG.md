@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/guynikan/release-sandbox/compare/0.17.1...0.18.0) (2026-11-09)
+
+
+### Novidades
+
+* **SBX-1601:** show the wishlist count ([#197](https://github.com/guynikan/release-sandbox/issues/197)) ([70740c2](https://github.com/guynikan/release-sandbox/commit/70740c2a2bf3a73db67871647ea7e2726cc07f5e))
+
 ## [0.17.1](https://github.com/guynikan/release-sandbox/compare/0.16.2...0.17.1) (2026-11-09)
 
 
