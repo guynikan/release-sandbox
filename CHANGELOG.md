@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.12.0](https://github.com/guynikan/release-sandbox/compare/0.11.2...0.12.0) (2026-11-09)
+
+
+### Novidades
+
+* **SBX-506:** greeting before the hotfix (D6) ([#122](https://github.com/guynikan/release-sandbox/issues/122)) ([fb7f91a](https://github.com/guynikan/release-sandbox/commit/fb7f91a05a423ce1f99f48af8f85aced3553fb95))
+
+
+### Correções
+
+* extra commit after the draft (D10c) ([0963671](https://github.com/guynikan/release-sandbox/commit/09636713dba600d1800943ff718329b4e46e2dbc))
+
+
+### Tarefas técnicas
+
+* **SBX-950:** ordinary work on a hotfix branch (D10a) ([93cb9f4](https://github.com/guynikan/release-sandbox/commit/93cb9f43a839fe8a32da057bbff63a53f806712c))
+* **SBX-950:** ordinary work on a hotfix branch (D10a) ([69a48b4](https://github.com/guynikan/release-sandbox/commit/69a48b4f999bb62f912605e7d33578d214985ad8))
+
 ## [0.11.0](https://github.com/guynikan/release-sandbox/compare/0.10.0...0.11.0) (2026-11-09)
 
 
