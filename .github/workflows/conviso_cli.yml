@@ -5,10 +5,14 @@ on:
   push:
     branches: [master]
   pull_request:
-    branches: [master]
+    branches: [master, proof/scan-new]
 
 jobs:
   conviso-ast:
+    if: >-
+      ${{ github.event_name != 'pull_request' ||
+      (github.event.pull_request.user.login != 'github-actions[bot]' &&
+      !startsWith(github.head_ref, 'publish/')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
