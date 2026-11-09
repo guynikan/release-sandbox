@@ -1,8 +1,11 @@
 name: Publish
 
-# Push to master. Acts ONLY when the push is the merge of a PR from publish/* (release) or hotfix/*:
-# publishes the saved draft deploy (restoreSiteDeploy, no rebuild) after checking that the master tree
-# equals the tree recorded in deploy-state.json. Any other push is skipped with a note.
+# Push to master. Acts ONLY when the push is the merge of a PR from publish/* (release) or hotfix/*, and
+# only when a tested draft exists for it: publishes that exact draft (restoreSiteDeploy, no rebuild) after
+# checking that the master tree equals the tree recorded in deploy-state.json.
+# - no draft (ordinary push, hotfix/* used as a plain work branch): green run, skipped, with a note;
+# - a draft exists but master/branch differs from it: red run, nothing published.
+# The decision lives in .github/scripts/release-flow (tested); this file only gathers facts and calls Netlify.
 # OFF until switch day: gated by the repo variable RELEASE_FLOW_ENABLED.
 on:
   push:
@@ -22,114 +25,99 @@ jobs:
     if: ${{ vars.RELEASE_FLOW_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-      SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID }}
-      SITE_NAME: ${{ vars.NETLIFY_PRODUCTION_SITE }}
+      # Production site (closeer-empresas-production). Not a secret: the variables only override the fallback.
+      SITE_ID: ${{ vars.NETLIFY_PRODUCTION_SITE_ID || 'ecaf0137-9763-432e-8257-59cb5a828116' }}
+      SITE_NAME: ${{ vars.NETLIFY_PRODUCTION_SITE || 'closeer-empresas-production' }}
+      CLI: .github/scripts/release-flow/cli.js
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+      # Which PR was merged as this commit? The lookup can lag right after the merge: retry a few times.
       - name: Is this push the merge of a publish/* or hotfix/* PR?
         id: pr
         run: |
-          # The PR lookup by commit can lag right after the merge: retry a few times.
-          PR=""
-          for i in 1 2 3 4 5 6; do
-            PR=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
-              --jq "[.[] | select(.merged_at != null and .merge_commit_sha == \"$GITHUB_SHA\" and .base.ref == \"master\" and .head.repo.full_name == \"$GITHUB_REPOSITORY\")][0] | select(. != null) | {number, head_ref: .head.ref, head_sha: .head.sha, title}" || true)
-            [ -n "$PR" ] && break
+          for _ in 1 2 3 4 5 6; do
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" > prs.json || echo '[]' > prs.json
+            jq -e --arg sha "$GITHUB_SHA" 'any(.[]; .merge_commit_sha == $sha)' prs.json >/dev/null && break
             sleep 5
           done
-          HEAD_REF=$(jq -r '.head_ref // empty' <<<"${PR:-null}")
-          # Branch names may contain shell metacharacters: only a strict pattern is accepted.
-          case "$HEAD_REF" in
-            publish/*|hotfix/*) [[ "$HEAD_REF" =~ ^(publish|hotfix)/[A-Za-z0-9._-]+$ ]] || { echo "::error::Unexpected branch name"; exit 1; } ;;
-          esac
-          case "$HEAD_REF" in
-            publish/*|hotfix/*)
-              echo "act=true" >> "$GITHUB_OUTPUT"
-              echo "number=$(jq -r .number <<<"$PR")" >> "$GITHUB_OUTPUT"
-              echo "head_ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
-              echo "head_sha=$(jq -r .head_sha <<<"$PR")" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              echo "act=false" >> "$GITHUB_OUTPUT"
-              {
-                echo "### Publish skipped"
-                echo "Push \`${GITHUB_SHA:0:7}\` to master is not the merge of a \`publish/*\` or \`hotfix/*\` PR (PR head: \`${HEAD_REF:-none}\`). Nothing was published."
-              } | tee -a "$GITHUB_STEP_SUMMARY"
-              ;;
-          esac
-      - name: Find the tag and the saved draft state
+          node "$CLI" detect-pr < prs.json
+      - name: Find the draft (tag and deploy-state.json)
         id: find
         if: steps.pr.outputs.act == 'true'
         env:
+          KIND: ${{ steps.pr.outputs.kind }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
           HEAD_REF: ${{ steps.pr.outputs.head_ref }}
           HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          VERSION: ${{ steps.pr.outputs.version }}
         run: |
-          git fetch --tags --force origin
-          case "$HEAD_REF" in
-            publish/*)
-              VER="${HEAD_REF#publish/}"
-              TAG=$(git tag -l "v$VER" "$VER" | head -n1)
-              [ -n "$TAG" ] || { echo "::error::No tag for $HEAD_REF (looked for v$VER and $VER)"; exit 1; }
-              ;;
-            hotfix/*)
-              # The hotfix draft tags the exact head commit of the branch. A branch that changed after
-              # the draft has no tag on its head, so there is no tested draft for it.
-              # hotfix/* is also the name of ordinary work branches, so the prefix alone decides nothing:
-              # publishing needs a draft made by hotfix-draft for exactly this head commit.
-              TAG=$(git tag --points-at "$HEAD_SHA" | grep '^hotfix-' | head -n1 || true)
-              if [ -z "$TAG" ]; then
-                PR_NUM="${{ steps.pr.outputs.number }}"
-                STALE=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-                  --jq "[.[] | select((.tag_name|startswith(\"hotfix-\")) and (.body|contains(\"/pull/$PR_NUM)\")))][0].tag_name // empty")
-                if [ -n "$STALE" ]; then
-                  echo "::error::PR #$PR_NUM has a hotfix draft ($STALE) but its head ${HEAD_SHA:0:7} is not the drafted commit: the branch changed after the draft. Nothing was published; run hotfix-draft again."
-                  exit 1
-                fi
-                {
-                  echo "### Publish skipped"
-                  echo "PR #$PR_NUM ($HEAD_REF) has no hotfix draft, so this hotfix/* branch is treated as ordinary work. Nothing was published."
-                } | tee -a "$GITHUB_STEP_SUMMARY"
-                echo "skip=true" >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
-              ;;
-          esac
-          gh release download "$TAG" --pattern deploy-state.json --repo "$GITHUB_REPOSITORY" --clobber \
-            || { echo "::error::Release $TAG has no deploy-state.json: the draft was not created."; exit 1; }
-          cat deploy-state.json
-          echo "TAG=$TAG" >> "$GITHUB_ENV"
-          echo "DRAFT=$(jq -r .draftDeployId deploy-state.json)" >> "$GITHUB_ENV"
-          echo "STATE_TREE=$(jq -r .tree deploy-state.json)" >> "$GITHUB_ENV"
-      - name: Guard - master tree must equal the tree of the draft
-        if: steps.pr.outputs.act == 'true' && steps.find.outputs.skip != 'true'
-        run: |
-          MASTER_TREE=$(git rev-parse "$GITHUB_SHA^{tree}")
-          TAG_TREE=$(git rev-parse "refs/tags/$TAG^{tree}")
-          if [ "$MASTER_TREE" != "$STATE_TREE" ] || [ "$TAG_TREE" != "$STATE_TREE" ]; then
-            {
-              echo "### Publish REFUSED for $TAG"
-              echo "- master tree (\`${GITHUB_SHA:0:7}\`): \`$MASTER_TREE\`"
-              echo "- draft tree (deploy-state.json): \`$STATE_TREE\`"
-              echo "- tag tree: \`$TAG_TREE\`"
-              echo "master contains something the tested draft does not. Nothing was published."
-            } | tee -a "$GITHUB_STEP_SUMMARY"
-            echo "::error::Refusing to publish $TAG: master tree $MASTER_TREE differs from the draft tree $STATE_TREE. master has content the tested draft does not have. Nothing was published."
-            exit 1
+          DRAFT_TAG=""
+          STALE_TAG=""
+          if [ "$KIND" = publish ]; then
+            # The release tag has no "v" (include-v-in-tag: false).
+            DRAFT_TAG=$(git tag -l "$VERSION" | head -n1)
+          else
+            # The hotfix draft tags the exact head commit of the branch. hotfix/* is also the name of ordinary
+            # work branches, so the prefix decides nothing: publishing needs a draft made by hotfix-draft for
+            # exactly this head. A branch that changed after the draft has no tag on its head.
+            DRAFT_TAG=$(git tag --points-at "$HEAD_SHA" | grep '^hotfix-' | head -n1 || true)
+            if [ -z "$DRAFT_TAG" ]; then
+              STALE_TAG=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                | jq -r --arg n "$PR_NUMBER" '[.[] | select((.tag_name | startswith("hotfix-")) and (.body // "" | contains("/pull/" + $n + ")")))][0].tag_name // empty')
+            fi
           fi
-          echo "Tree guard ok: $MASTER_TREE" | tee -a "$GITHUB_STEP_SUMMARY"
+          STATE_FILE=""
+          TAG_COMMIT=""
+          TAG_TREE=""
+          if [ -n "$DRAFT_TAG" ]; then
+            TAG_COMMIT=$(git rev-list -n1 "refs/tags/$DRAFT_TAG")
+            TAG_TREE=$(git rev-parse "refs/tags/$DRAFT_TAG^{tree}")
+            if gh release download "$DRAFT_TAG" --pattern deploy-state.json --repo "$GITHUB_REPOSITORY" --clobber; then
+              STATE_FILE=deploy-state.json
+            fi
+          fi
+          {
+            echo "draft_tag=$DRAFT_TAG"
+            echo "stale_tag=$STALE_TAG"
+            echo "state_file=$STATE_FILE"
+            echo "tag_commit=$TAG_COMMIT"
+            echo "tag_tree=$TAG_TREE"
+          } >> "$GITHUB_OUTPUT"
+      - name: Decide (draft exists and master tree equals the draft tree)
+        id: decide
+        if: steps.pr.outputs.act == 'true'
+        env:
+          KIND: ${{ steps.pr.outputs.kind }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          DRAFT_TAG: ${{ steps.find.outputs.draft_tag }}
+          STALE_TAG: ${{ steps.find.outputs.stale_tag }}
+          STATE_FILE: ${{ steps.find.outputs.state_file }}
+          TAG_COMMIT: ${{ steps.find.outputs.tag_commit }}
+          TAG_TREE: ${{ steps.find.outputs.tag_tree }}
+        run: |
+          MASTER_TREE=$(git rev-parse "$GITHUB_SHA^{tree}") node "$CLI" decide-publish
       - name: Publish the draft (restoreSiteDeploy, lock kept)
-        if: steps.pr.outputs.act == 'true' && steps.find.outputs.skip != 'true'
+        if: steps.decide.outputs.action == 'publish'
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
+          DRAFT: ${{ steps.decide.outputs.draft }}
         run: |
           API=https://api.netlify.com/api/v1
           H="Authorization: Bearer $NETLIFY_AUTH_TOKEN"
           PREVIOUS=$(curl -fsS -H "$H" "$API/sites/$SITE_ID" | jq -r '.published_deploy.id')
           curl -fsS -X POST -H "$H" "$API/sites/$SITE_ID/deploys/$DRAFT/restore" | jq '{id, state, published_at}'
-          for i in $(seq 1 12); do
+          for _ in $(seq 1 12); do
             CUR=$(curl -fsS -H "$H" "$API/sites/$SITE_ID" | jq -r '[.published_deploy.id, .published_deploy.locked] | @tsv')
             [ "${CUR%%$'\t'*}" = "$DRAFT" ] && break
             sleep 3
@@ -142,12 +130,12 @@ jobs:
             echo "- https://$SITE_NAME.netlify.app"
           } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Record the GitHub Deployment (production)
-        if: steps.pr.outputs.act == 'true' && steps.find.outputs.skip != 'true'
+        if: steps.decide.outputs.action == 'publish'
         env:
-          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          TAG: ${{ steps.decide.outputs.tag }}
+          DRAFT: ${{ steps.decide.outputs.draft }}
         run: |
-          PAYLOAD=$(jq -cn --arg d "$DRAFT" --arg p "$PREVIOUS" --arg t "$TAG" --arg k "$HEAD_REF" \
-            '{deployId:$d, previousDeployId:$p, tag:$t, source:$k}')
+          PAYLOAD=$(jq -cn --arg d "$DRAFT" --arg p "$PREVIOUS" --arg t "$TAG" '{deployId:$d, previousDeployId:$p, tag:$t}')
           DID=$(jq -n --arg ref "$GITHUB_SHA" --arg desc "Publish $TAG" --argjson payload "$PAYLOAD" \
             '{ref:$ref, environment:"production", auto_merge:false, required_contexts:[], description:$desc, payload:$payload}' \
             | gh api -X POST "repos/$GITHUB_REPOSITORY/deployments" --input - --jq .id)

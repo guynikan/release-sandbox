@@ -4,7 +4,7 @@ name: Sync master into next-release
 # When the merge is refused (conflict, workflow-file restriction, branch rule) the PR stays open with
 # a comment and the run fails; a person then merges it (that merge triggers the downstream workflows).
 # Merges made with GITHUB_TOKEN do not trigger other workflows, so after a successful automatic sync
-# the release-branch workflows are dispatched explicitly (workflow_dispatch is the documented exception).
+# the next-release workflows are dispatched explicitly (workflow_dispatch is the documented exception).
 # OFF until switch day: gated by the repo variable RELEASE_FLOW_ENABLED.
 on:
   push:
@@ -36,7 +36,7 @@ jobs:
         id: sync
         run: .github/scripts/sync-pr.sh next-release master "Sync master into next-release"
       # The merge above was made with GITHUB_TOKEN, so its push to release triggers nothing.
-      - name: Dispatch the release-branch workflows
+      - name: Dispatch the next-release workflows
         if: steps.sync.outputs.merged == 'true'
         run: |
           failed=0
