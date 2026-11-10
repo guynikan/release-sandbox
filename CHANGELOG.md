@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/guynikan/release-sandbox/compare/0.18.0...0.19.0) (2026-11-10)
+
+
+### Novidades
+
+* **SBX-1701:** show the gift wrap option ([#204](https://github.com/guynikan/release-sandbox/issues/204)) ([caf504b](https://github.com/guynikan/release-sandbox/commit/caf504bcda5c1dada7fbd09625142108dcf1a143))
+* **SBX-1702:** show the gift message line ([#205](https://github.com/guynikan/release-sandbox/issues/205)) ([622c0bf](https://github.com/guynikan/release-sandbox/commit/622c0bf588fdaf88417d9d8abf9b0e6c47ef2442))
+
 ## [0.18.0](https://github.com/guynikan/release-sandbox/compare/0.17.1...0.18.0) (2026-11-09)
 
 
