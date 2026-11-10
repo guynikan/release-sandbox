@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.20.1](https://github.com/guynikan/release-sandbox/compare/0.19.1...0.20.1) (2026-11-10)
+
+
+### Novidades
+
+* **SBX-1801:** show the packaging weight ([#211](https://github.com/guynikan/release-sandbox/issues/211)) ([9ca718e](https://github.com/guynikan/release-sandbox/commit/9ca718e3f3f495d935ab17cdc18b5b3836ba2c5a))
+
+
+### Integração contínua
+
+* release 0.20.1 ([#213](https://github.com/guynikan/release-sandbox/issues/213)) ([5227b12](https://github.com/guynikan/release-sandbox/commit/5227b125d148f941447cf31209110f1590eec07c))
+
 ## [0.19.1](https://github.com/guynikan/release-sandbox/compare/0.19.0...0.19.1) (2026-11-10)
 
 
