@@ -5,6 +5,9 @@
 # When the automatic merge is refused (conflict, or a restriction such as the one GITHUB_TOKEN has
 # on workflow files), the PR stays open, a comment explains why and that a person must merge it,
 # and the script exits 1 so the run fails visibly. A human merge triggers downstream workflows.
+# The head of the PR is <head> itself (e.g. master, which is protected): a conflict is never fixed on the PR's
+# own branch. A person opens a NEW PR from a branch created off <head> (merging <base> into it); once that
+# merge lands, <head> is an ancestor of <base> and this PR closes by itself.
 # Needs GH_TOKEN and GITHUB_REPOSITORY. Sets `merged=true` in GITHUB_OUTPUT on success.
 set -euo pipefail
 
@@ -57,7 +60,7 @@ done
 echo "PR #$N mergeable=$STATE"
 
 if [ "$STATE" = "CONFLICTING" ]; then
-  comment_once "sync-conflict" "Automatic merge not possible: there is a conflict between \`$HEAD\` and \`$BASE\`. A person must resolve it (merge \`$BASE\` into a branch from \`$HEAD\`, or resolve it locally) and merge with a merge commit, never squash. This PR is left open on purpose."
+  comment_once "sync-conflict" "Automatic merge not possible: there is a conflict between \`$HEAD\` and \`$BASE\`. The head of this PR is \`$HEAD\` itself, so it cannot be fixed on this PR's branch. A person must create a NEW branch from \`$HEAD\`, merge \`origin/$BASE\` into it and resolve the conflict, open a NEW PR to \`$BASE\` and merge it with a merge commit (never squash). This PR then closes by itself. It is left open on purpose."
   echo "::error::PR #$N ($HEAD -> $BASE) has conflicts; left open for a person to merge."
   exit 1
 fi
