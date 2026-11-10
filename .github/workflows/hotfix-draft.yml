@@ -137,7 +137,8 @@ jobs:
             node "$RUNNER_TEMP/release-flow/cli.js" deploy-state
           cat deploy-state.json
           # The notes keep "<PR url>)" : publish.yml uses it to recognise a draft whose branch changed afterwards.
-          gh release create "$TAG" deploy-state.json --target "$COMMIT" --title "$TAG" \
+          # --latest=false: a hotfix draft may never be published, so it must not become the "Latest" release.
+          gh release create "$TAG" deploy-state.json --target "$COMMIT" --title "$TAG" --latest=false \
             --notes "Hotfix $NEXT: $PR_TITLE ($PR_URL). Draft deploy $DRAFT."
           # Plain tag on the previous release commit, not on the hotfix: release-please looks for the tag named
           # like the manifest version, and a tag on the hotfix commit would hide PRs already merged on next-release.
