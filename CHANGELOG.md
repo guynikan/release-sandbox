@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/guynikan/release-sandbox/compare/0.19.0...0.19.1) (2026-11-10)
+
+
+### Correções
+
+* **SBX-1703:** show a valid gift wrap option ([#208](https://github.com/guynikan/release-sandbox/issues/208)) ([f1816fc](https://github.com/guynikan/release-sandbox/commit/f1816fc285c8289080b2431de06d8d218ad727ab))
+
 ## [0.19.0](https://github.com/guynikan/release-sandbox/compare/0.18.0...0.19.0) (2026-11-10)
 
 
