@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.21.0](https://github.com/guynikan/release-sandbox/compare/0.20.1...0.21.0) (2026-11-19)
+
+
+### Novidades
+
+* adiciona ícone na saudação ([2e599f8](https://github.com/guynikan/release-sandbox/commit/2e599f8665d9baceea96bde36dd075dbeaa9a583))
+* **a:** first commit ([e3987b7](https://github.com/guynikan/release-sandbox/commit/e3987b7aa1e70541e0a8a3005a6bc699cbc0da69))
+* **a:** scenario A merge commit ([#215](https://github.com/guynikan/release-sandbox/issues/215)) ([035b288](https://github.com/guynikan/release-sandbox/commit/035b2881ff9d1a0e3b9cc2bb5f00f33cdd74ba0c))
+* **b:** feature commit ([32d2cc0](https://github.com/guynikan/release-sandbox/commit/32d2cc06fe6b51a561b1d61b23080b1ac56ec371))
+* **b:** scenario B internal merge ([#217](https://github.com/guynikan/release-sandbox/issues/217)) ([f9357f4](https://github.com/guynikan/release-sandbox/commit/f9357f4c19290037db70f47aaf5c13f718fba776))
+* **d:** scenario D squash single commit ([#219](https://github.com/guynikan/release-sandbox/issues/219)) ([e07621a](https://github.com/guynikan/release-sandbox/commit/e07621ac1df1c9903236117700762cf2679f41f6))
+* melhora o tooltip do cartão de produto ([98f7fc8](https://github.com/guynikan/release-sandbox/commit/98f7fc8c04fdda63c7b3571076e983a1d64d1206))
+
+
+### Correções
+
+* **a:** second commit ([580bb79](https://github.com/guynikan/release-sandbox/commit/580bb790f467b02d8488112df8d548a13207bb68))
+* corrige a seleção de idioma no rodapé ([6e7fe4f](https://github.com/guynikan/release-sandbox/commit/6e7fe4f72a297cae7944c0e9e678983c7de2b29f))
+* corrige exportação quebrando com estado vazio ([2af60cc](https://github.com/guynikan/release-sandbox/commit/2af60cc3ca4a74c0ab165e91c16f48b08479efdf))
+
 ## [0.20.1](https://github.com/guynikan/release-sandbox/compare/0.19.1...0.20.1) (2026-11-10)
 
 
