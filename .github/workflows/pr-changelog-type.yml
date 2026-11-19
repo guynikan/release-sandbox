@@ -1,0 +1,75 @@
+name: PR changelog type
+
+# PR titles are free text now: release-please reads the changelog type from a BEGIN_COMMIT_OVERRIDE /
+# END_COMMIT_OVERRIDE block at the end of the merged PR's body (already used by hand on PR #5080), not
+# from the squash commit message. This workflow keeps that block in sync with the PR's label, mapped in
+# lib.js (release-please-config.json has the changelog sections):
+#   label `feature` -> feat (Novidades)   label `bug` -> fix (Correções)   anything else / no label -> chore
+# `chore` is marked hidden in release-please-config.json, so it never reaches the changelog.
+#
+# It writes the override block even for a PR with no matching label (type chore): a free-text title that
+# still happens to look conventional ("fix: ...", out of old habit) must never leak into the changelog
+# without a `bug`/`feature` label deciding it. It never posts a PR comment, only edits the body.
+#
+# SECURITY: pull_request_target runs this workflow file from the base branch and exposes GITHUB_TOKEN, so
+# it must NEVER check out or execute PR code. The checkout below takes the default ref (github.sha, the
+# BASE branch tip for this event, never the PR head) to read only this repo's OWN
+# .github/scripts/release-flow. The untrusted PR fields (title, body, labels) reach the script only
+# through env vars, never interpolated into a shell script (see pr-preview.yml).
+#
+# Not gated by RELEASE_FLOW_ENABLED: it is dev-flow PR hygiene (which changelog section a PR lands in),
+# independent of the block 3/4 production-release switch day.
+on:
+  pull_request_target:
+    types: [opened, reopened, edited, labeled, unlabeled]
+
+concurrency:
+  group: pr-changelog-type-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read # actions/checkout needs this in a private repo; the token would otherwise be contents: none
+  pull-requests: write
+
+jobs:
+  override:
+    # Bot PRs never need this (release-please, sync and publish/* PRs are opened by github-actions[bot];
+    # Dependabot's own label gives it `chore` anyway) and hotfix/* is renamed by hotfix-draft. Fork PRs
+    # (head repo != this repo) are skipped too, like the other pull_request_target workflows.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'github-actions[bot]' &&
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
+      !startsWith(github.event.pull_request.head.ref, 'hotfix/') &&
+      !startsWith(github.event.pull_request.head.ref, 'publish/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # No `ref:` on purpose: defaults to github.sha, which for pull_request_target is the BASE branch
+      # tip, never the PR head. persist-credentials: false, same as the other release-flow checkouts.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Keep the changelog-override block in sync with the label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS_JSON: ${{ toJson(github.event.pull_request.labels) }}
+        run: |
+          set -euo pipefail
+          # Redirects, never command substitution: `$(...)` strips trailing newlines, which would make
+          # new-body.txt lose the \n upsertCommitOverride always leaves after END_COMMIT_OVERRIDE.
+          node .github/scripts/release-flow/cli.js pr-changelog-override > new-body.txt
+          printf '%s' "$PR_BODY" > old-body.txt
+          if cmp -s new-body.txt old-body.txt; then
+            echo "Changelog override already up to date; nothing to do."
+            exit 0
+          fi
+          gh pr edit "$PR_NUMBER" --body-file new-body.txt
