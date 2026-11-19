@@ -12,6 +12,7 @@
 //   deploy-state      env KIND TAG VERSION COMMIT TREE DRAFT_DEPLOY_ID PREVIOUS_DEPLOY_ID SITE_ID [PR]; writes deploy-state.json
 //   rollback-target   stdin: GET /deployments JSON; env INPUT_DEPLOY CURRENT_DEPLOY
 //   workflow-files    stdin: changed file paths, one per line; exit 1 when any is under .github/workflows/
+//   pr-changelog-override  env PR_TITLE PR_BODY PR_LABELS_JSON; prints the new PR body to stdout
 
 const fs = require("node:fs");
 const lib = require("./lib");
@@ -153,6 +154,15 @@ const commands = {
       `::error::This PR changes ${hits.join(", ")}. The GITHUB_TOKEN cannot push commits that change .github/workflows/*, so hotfix-draft cannot prepare this PR. The guardian must merge it by hand (no automatic draft or publish).`,
     );
     process.exitCode = 1;
+  },
+
+  // Only prints the new body; the workflow compares it against PR_BODY and calls `gh pr edit` itself,
+  // so a no-op run never re-triggers the `edited` event that fired this run.
+  "pr-changelog-override"() {
+    const labels = JSON.parse(env("PR_LABELS_JSON", "[]"));
+    const type = lib.changelogTypeFromLabels(labels);
+    const overrideLine = lib.buildCommitOverride(type, env("PR_TITLE"));
+    process.stdout.write(lib.upsertCommitOverride(env("PR_BODY"), overrideLine));
   },
 };
 
