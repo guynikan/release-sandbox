@@ -257,3 +257,52 @@ test("pickRollbackTarget: explicit input wins and is validated", () => {
   assert.throws(() => lib.pickRollbackTarget({ currentId: DEPLOY, deployments: [] }), /No recorded publish/);
   assert.throws(() => lib.pickRollbackTarget({ currentId: DEPLOY, deployments: [{ payload: { deployId: DEPLOY, previousDeployId: "" } }] }), /No recorded publish/);
 });
+
+test("changelogTypeFromLabels maps feature/bug, anything else or none is chore", () => {
+  assert.equal(lib.changelogTypeFromLabels([{ name: "feature" }]), "feat");
+  assert.equal(lib.changelogTypeFromLabels([{ name: "bug" }]), "fix");
+  assert.equal(lib.changelogTypeFromLabels([{ name: "enhancement" }]), "chore");
+  assert.equal(lib.changelogTypeFromLabels([{ name: "dependencies" }, { name: "javascript" }]), "chore");
+  assert.equal(lib.changelogTypeFromLabels([]), "chore");
+  assert.equal(lib.changelogTypeFromLabels(undefined), "chore");
+  // Plain strings are accepted too (some callers pass label names, not label objects).
+  assert.equal(lib.changelogTypeFromLabels(["feature"]), "feat");
+  // Both present: bug (fix) wins, checked first.
+  assert.equal(lib.changelogTypeFromLabels([{ name: "feature" }, { name: "bug" }]), "fix");
+});
+
+test("buildCommitOverride: type always comes from the label, scope is kept if the title has one", () => {
+  assert.equal(lib.buildCommitOverride("feat", "filtro por unidade"), "feat: filtro por unidade");
+  // Title still looks conventional (old habit): its own type is discarded, the scope is kept.
+  assert.equal(lib.buildCommitOverride("fix", "feat(jobs): filtro por unidade"), "fix(jobs): filtro por unidade");
+  assert.equal(lib.buildCommitOverride("chore", "docs: atualiza o README"), "chore: atualiza o README");
+  // Extra colons after the first type/scope prefix stay in the description untouched.
+  assert.equal(lib.buildCommitOverride("fix", "fix(auth): trata 401: redireciona pro login"), "fix(auth): trata 401: redireciona pro login");
+  // Whitespace (including a trailing newline from the GitHub API) is collapsed.
+  assert.equal(lib.buildCommitOverride("feat", "  algo   com   espaços \n"), "feat: algo com espaços");
+  assert.equal(lib.buildCommitOverride("chore", ""), "chore: (sem título)");
+  // A title that spells out the block delimiters must never break them: defused, not rejected.
+  assert.equal(
+    lib.buildCommitOverride("chore", "fecha a brecha do BEGIN_COMMIT_OVERRIDE / END_COMMIT_OVERRIDE"),
+    "chore: fecha a brecha do BEGINCOMMITOVERRIDE / ENDCOMMITOVERRIDE",
+  );
+});
+
+test("upsertCommitOverride appends the block, replaces it in place, and never touches the rest of the body", () => {
+  const body = "## O quê\n\nAlgo útil.\n\n## Comentários adicionais\n";
+  const added = lib.upsertCommitOverride(body, "feat: filtro por unidade");
+  assert.equal(added, "## O quê\n\nAlgo útil.\n\n## Comentários adicionais\n\nBEGIN_COMMIT_OVERRIDE\nfeat: filtro por unidade\nEND_COMMIT_OVERRIDE\n");
+
+  const replaced = lib.upsertCommitOverride(added, "fix: filtro por unidade");
+  assert.equal(replaced, "## O quê\n\nAlgo útil.\n\n## Comentários adicionais\n\nBEGIN_COMMIT_OVERRIDE\nfix: filtro por unidade\nEND_COMMIT_OVERRIDE\n");
+
+  // Idempotent: re-running with the same line changes nothing.
+  assert.equal(lib.upsertCommitOverride(replaced, "fix: filtro por unidade"), replaced);
+
+  assert.equal(lib.upsertCommitOverride("", "chore: x"), "BEGIN_COMMIT_OVERRIDE\nchore: x\nEND_COMMIT_OVERRIDE\n");
+  assert.equal(lib.upsertCommitOverride(null, "chore: x"), "BEGIN_COMMIT_OVERRIDE\nchore: x\nEND_COMMIT_OVERRIDE\n");
+
+  // Real shape used by hand on PR #5080: trailing blank lines around the block are normalized away.
+  const manual = "Algo.\n\n\nBEGIN_COMMIT_OVERRIDE\nci(netlify): adiciona HSTS e Permissions-Policy (CF-2024)\nEND_COMMIT_OVERRIDE\n\n";
+  assert.equal(lib.upsertCommitOverride(manual, "chore: adiciona HSTS e Permissions-Policy (CF-2024)"), "Algo.\n\nBEGIN_COMMIT_OVERRIDE\nchore: adiciona HSTS e Permissions-Policy (CF-2024)\nEND_COMMIT_OVERRIDE\n");
+});

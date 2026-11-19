@@ -143,6 +143,9 @@ jobs:
           # Plain tag on the previous release commit, not on the hotfix: release-please looks for the tag named
           # like the manifest version, and a tag on the hotfix commit would hide PRs already merged on next-release.
           gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$PLAIN_TAG" -f sha="$ANCHOR_SHA" >/dev/null
+          # `production` notifies Slack on open + merge; cheap to add once the draft is ready. Idempotent:
+          # safe to repeat if hotfix-draft runs again on the same PR.
+          gh pr edit "$PR" --add-label production
           {
             echo "### Hotfix draft $TAG"
             echo "- plain tag \`$PLAIN_TAG\` -> \`${ANCHOR_SHA:0:7}\` (changelog anchor of the previous release, not the hotfix)"
