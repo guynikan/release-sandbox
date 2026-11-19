@@ -236,6 +236,67 @@ function pickRollbackTarget({ input, currentId, deployments }) {
   return target;
 }
 
+// PR label -> release-please changelog type (release-please-config.json), checked in this order so a PR
+// with both labels is not ambiguous. Any other label, several non-matching labels, or none -> "chore"
+// (hidden in release-please-config.json), never shown in the changelog.
+const LABEL_TYPE_PRIORITY = [
+  { label: "bug", type: "fix" },
+  { label: "feature", type: "feat" },
+];
+const OVERRIDE_MARKERS = /BEGIN_COMMIT_OVERRIDE|END_COMMIT_OVERRIDE/gi;
+// `type(scope): description` or `type: description` (the type itself is discarded: the label decides it).
+const CONVENTIONAL_TITLE_RE = /^[A-Za-z][A-Za-z0-9_-]*(?:\(([^()\n]+)\))?:\s*(.+)$/;
+
+/**
+ * Picks the release-please changelog type for a PR from its labels.
+ * @param {Array<string|{name?: string}>} labels
+ * @returns {"feat"|"fix"|"chore"}
+ */
+function changelogTypeFromLabels(labels) {
+  const names = new Set(
+    (Array.isArray(labels) ? labels : [])
+      .map((l) => (typeof l === "string" ? l : l?.name))
+      .filter((n) => typeof n === "string"),
+  );
+  for (const { label, type } of LABEL_TYPE_PRIORITY) {
+    if (names.has(label)) return type;
+  }
+  return "chore";
+}
+
+/**
+ * Builds the single line release-please reads from the BEGIN_COMMIT_OVERRIDE block: `type: description`
+ * or `type(scope): description`. The PR title is free text, but if it still looks conventional (old habit),
+ * any scope the author wrote is kept; the type itself always comes from `type`, never from the title (a
+ * title that merely resembles a type, e.g. "fix: ..." with no `bug` label, must not fool release-please).
+ * BEGIN_COMMIT_OVERRIDE/END_COMMIT_OVERRIDE inside the title would break the block delimiters, so that
+ * text is defused (underscores dropped) rather than rejected.
+ * @param {"feat"|"fix"|"chore"} type
+ * @param {string} title
+ */
+function buildCommitOverride(type, title) {
+  const clean = String(title ?? "").replace(/\s+/g, " ").trim();
+  const m = CONVENTIONAL_TITLE_RE.exec(clean);
+  const scope = m?.[1] ?? "";
+  const description = (m ? m[2] : clean).replace(OVERRIDE_MARKERS, (hit) => hit.replace(/_/g, "")) || "(sem título)";
+  return scope ? `${type}(${scope}): ${description}` : `${type}: ${description}`;
+}
+
+const OVERRIDE_BLOCK_RE = /\n*BEGIN_COMMIT_OVERRIDE\n[\s\S]*?\nEND_COMMIT_OVERRIDE\n*/g;
+
+/**
+ * Replaces the BEGIN_COMMIT_OVERRIDE/END_COMMIT_OVERRIDE block at the end of a PR body with `overrideLine`,
+ * appending it when none exists yet. Idempotent (running it twice on its own output changes nothing) and
+ * never touches the rest of the body.
+ * @param {string} body current PR body
+ * @param {string} overrideLine from buildCommitOverride()
+ */
+function upsertCommitOverride(body, overrideLine) {
+  const rest = String(body ?? "").replace(OVERRIDE_BLOCK_RE, "").replace(/\s+$/, "");
+  const block = `BEGIN_COMMIT_OVERRIDE\n${overrideLine}\nEND_COMMIT_OVERRIDE\n`;
+  return rest ? `${rest}\n\n${block}` : block;
+}
+
 module.exports = {
   classifyHeadRef,
   pickMergedPr,
@@ -249,4 +310,7 @@ module.exports = {
   parseDeployState,
   decidePublish,
   pickRollbackTarget,
+  changelogTypeFromLabels,
+  buildCommitOverride,
+  upsertCommitOverride,
 };

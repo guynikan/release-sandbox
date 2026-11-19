@@ -117,3 +117,17 @@ test("rollback-target", () => {
   assert.equal(r.outputs.target, prev);
   assert.equal(run("rollback-target", { env: { CURRENT_DEPLOY: cur }, input: "[]" }).status, 1);
 });
+
+test("pr-changelog-override prints the new body with the type from the label, not the title", () => {
+  const env = { PR_TITLE: "ajusta o botão de filtro", PR_BODY: "## O quê\n\nAlgo.\n", PR_LABELS_JSON: JSON.stringify([{ name: "feature" }]) };
+  const r = run("pr-changelog-override", { env });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, "## O quê\n\nAlgo.\n\nBEGIN_COMMIT_OVERRIDE\nfeat: ajusta o botão de filtro\nEND_COMMIT_OVERRIDE\n");
+});
+
+test("pr-changelog-override defaults to chore with no matching label and replaces an existing block", () => {
+  const body = "Algo.\n\nBEGIN_COMMIT_OVERRIDE\nfeat: título antigo\nEND_COMMIT_OVERRIDE\n";
+  const r = run("pr-changelog-override", { env: { PR_TITLE: "novo título", PR_BODY: body, PR_LABELS_JSON: "[]" } });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, "Algo.\n\nBEGIN_COMMIT_OVERRIDE\nchore: novo título\nEND_COMMIT_OVERRIDE\n");
+});

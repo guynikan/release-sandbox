@@ -27,7 +27,8 @@
         },
         {
           "type": "chore",
-          "section": "Tarefas técnicas"
+          "section": "Tarefas técnicas",
+          "hidden": true
         },
         {
           "type": "revert",

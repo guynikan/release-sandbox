@@ -139,4 +139,7 @@ jobs:
           BODY
             N=$(gh pr create --base master --head "$BRANCH" --title "Release $TAG" --body-file pr-body.md | sed 's#.*/##')
           fi
+          # `production` notifies Slack on open + merge. Idempotent: safe to repeat on an existing PR
+          # (e.g. a redo_draft_tag run).
+          gh pr edit "$N" --add-label production
           echo "PR #$N: https://github.com/$GITHUB_REPOSITORY/pull/$N" >> "$GITHUB_STEP_SUMMARY"
